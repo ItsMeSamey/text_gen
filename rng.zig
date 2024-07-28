@@ -19,7 +19,7 @@ fn getPrng() std.Random.DefaultPrng {
 /// RNG object to be used
 var Prng: ?std.Random.DefaultPrng = null;
 
-pub noinline fn random() std.Random {
+pub fn random() std.Random {
   if (Prng) |_| {
     return Prng.?.random();
   } else {

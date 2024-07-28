@@ -13,9 +13,9 @@ pub fn gen(self: *const Self) []const u8 {
   // Return the next word, not the one we are currently inside. This is "more" random (I think!).
   if (std.mem.indexOfScalarPos(u8, self.data, self.random.intRangeAtMost(u32, 0, self.length), self.delimiter)) |from| {
     if (std.mem.indexOfScalarPos(u8, self.data, from+1, self.delimiter)) |till| {
-      return self.data[from..till]; // everything normal here
+      return self.data[from+1..till]; // everything normal here
     } else {
-      return self.data[from..]; // we were in last second word
+      return self.data[from+1..]; // we were in last second word
     }
   } else if (std.mem.indexOfScalar(u8, self.data, self.delimiter)) |till| {
     return self.data[0..till]; // we were in the last word
