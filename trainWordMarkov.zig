@@ -10,15 +10,6 @@ const Table = std.HashMap([]const u8, u32, struct {
 
 const StringArray = std.ArrayList([]const u8);
 
-const StringMakovOptions = struct {
-  /// The characters that we should split at
-  delim: ?[]const u8,
-  /// Characters we should skip
-  skip: ?[]const u8,
-  /// The data owner (only used for free)
-  allocator: std.mem.Allocator,
-};
-
 fn StringMakov(Len: comptime_int) type {
   const CyclicList = @import("common/cyclicList.zig").GenCyclicList(Len, []const u8);
   const Base = @import("common/markov.zig").GenBase(Len, u32);
@@ -41,7 +32,7 @@ fn StringMakov(Len: comptime_int) type {
         .base = Base.init(allocator),
         .table = Table.init(allocator),
         .array = StringArray.init(allocator),
-        .cyclicList = CyclicList.init(allocator),
+        .cyclicList = .{},
       };
     }
 
@@ -49,49 +40,34 @@ fn StringMakov(Len: comptime_int) type {
     /// WARNING: Data must Not be deleted/free'd during for the lifetime of `self`
     /// `owner` must be null if data is not allocated, or you want to keep ownership of the data.
     /// `owner` is used to free memory when deinit is called.
-    fn train(self: *Self, data: []const u8, options: StringMakovOptions) !void {
-      if (options.allocator != null) {
-        try self.base.storeFreeable(data, options.allocator.?);
+    pub fn train(self: *Self, data: []const u8, owner: ?std.mem.Allocator) !void {
+      if (owner != null) {
+        try self.base.storeFreeable(data, owner.?);
       }
-      var iterator = std.mem.tokenizeAny(u8, data, options.delim);
+      var iterator = std.mem.tokenizeScalar(u8, data, 0);
 
       for (0..Len-1) |_| {
         // You MUST ensure that length of words in data is more than the chain length for each function call
-        try self.turn(iterator.next() orelse return error.@"Insufficient Data", options.skip);
+        try self.turn(iterator.next() orelse return error.InsufficientData);
       }
 
       for (iterator.next()) |key| {
-        try self.turn(key, options.skip);
+        try self.turn(key);
         try self.base.increment(self.cyclicList.getSlice());
       }
     }
 
     /// Turn the `self.cyclicList`
-    /// Remove all the occurrences of skip characters from allocated copy of val.
-    /// If it is not already added, we add the word to end of `self.array`
+    /// If not added before, we add the word to end of `self.array`
     ///   and set `self.table[val]` = index we inserted the word at (in `self.array`)
     /// The index is then used as a unique identifier for that word.
-    fn turn(self: *Self, val: []const u8, skip: []const u8) !void {
-      var dest = try self.array.allocator.alloc(u8, val.len);
-      @memcpy(dest, val);
-      var eb: usize = 0;
-      for (dest.len, 0..) |character, index| {
-        if (std.mem.indexOfScalar(skip, character) != null) {
-          eb += 1;
-        } else {
-          dest[index - eb] = character;
-        }
-      }
-      dest.len -= eb;
-
-      const result = try self.table.getOrPut(dest);
+    fn turn(self: *Self, val: []const u8) !void {
+      const result = try self.table.getOrPut(val);
       if (result.found_existing) {
         self.cyclicList.push(result.value_ptr.*);
-        self.array.allocator.free(dest);
       } else {
         self.cyclicList.push(self.array.items.len);
-        try self.array.allocator.resize(dest, eb);
-        try self.array.append(dest);
+        try self.array.append(val);
       }
     }
 

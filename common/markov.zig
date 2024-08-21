@@ -5,7 +5,6 @@ pub fn GenBase(Len: comptime_int, Key: type) type {
   comptime std.debug.assert(Len > 1);
 
   const meta = @import("meta.zig");
-
   const MetaKeyType = switch (Key) {
     u8, u32 => [Len]Key,
     // Unexpected type

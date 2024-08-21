@@ -13,8 +13,7 @@ const Self = @This();
 
 /// Return a random word from `self.data`.
 pub fn gen(self: *Self) []const u8 {
-  self.at ^= self.random.int(usize);
-  self.at %= self.data.len;
+  self.at = @mod(self.at ^ self.random.int(usize), self.data.len);
   self.at = if (std.mem.indexOfScalarPos(u8, self.data, self.at, self.delimiter)) |idx| idx + 1 else 0;
 
   // Return the next word, not the one we are currently inside. This is "more" random (I think!).
