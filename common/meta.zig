@@ -1,7 +1,12 @@
 const std = @import("std");
 
+pub fn Uint(comptime len: comptime_int, sliceType: type) type {
+  const childSize = @sizeOf(std.meta.Child(sliceType)) * 8;
+  return std.meta.Int(.unsigned, childSize * len);
+}
+
 /// Convert a slice of af a given size to uint of appropriate length
-pub fn asUint(comptime len: comptime_int, slice: anytype) std.meta.Int(.unsigned, 8*len) {
+pub fn asUint(comptime len: comptime_int, slice: anytype) Uint(len, @TypeOf(slice)) {
   return @bitCast(slice[0..len].*);
 }
 

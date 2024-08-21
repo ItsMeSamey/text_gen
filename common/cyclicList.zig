@@ -2,7 +2,7 @@ const std = @import("std");
 
 /// Make a cyclic list with a list of given type T
 /// Use `len` = `0` if you want to have slice buffer you can assign at runtime 
-pub fn GenCyclicList(T: type, len: comptime_int) type {
+pub fn GenCyclicList(len: comptime_int, T: type) type {
   const bufType = if (len == 0) []T else [len]T;
   return struct {
     _buf: bufType = undefined,
