@@ -80,7 +80,9 @@ pub const strLt = getCompareBytes(.lt);
 test {
   try std.testing.expect(strEq("123", "123"));
   try std.testing.expect(strLt("14", "23") or strLt("23", "14"));
+
   const pre = " " ** 16;
+  try std.testing.expect(strEq(pre ++ "123", pre ++ "123"));
   try std.testing.expect(strLt(pre ++ "23", pre ++ "14") or strLt(pre ++ "14", pre ++ "23"));
 }
 

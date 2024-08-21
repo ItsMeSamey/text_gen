@@ -10,7 +10,7 @@ const Table = std.HashMap([]const u8, u32, struct {
 
 const StringArray = std.ArrayList([]const u8);
 
-fn StringMakov(Len: comptime_int) type {
+fn WordMakov(Len: comptime_int) type {
   const CyclicList = @import("common/cyclicList.zig").GenCyclicList(Len, []const u8);
   const Base = @import("common/markov.zig").GenBase(Len, u32);
 
@@ -97,7 +97,7 @@ fn StringMakov(Len: comptime_int) type {
   };
 }
 
-const stable = StringMakov(4);
+const stable = WordMakov(4);
 
 test {
   const s: stable = undefined;

@@ -28,3 +28,7 @@ pub fn random() std.Random {
   }
 }
 
+test random {
+  _ = random();
+}
+

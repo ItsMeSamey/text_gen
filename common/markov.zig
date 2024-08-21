@@ -14,6 +14,7 @@ pub fn GenBase(Len: comptime_int, Key: type) type {
   // Make a int type that can store the whole chain in case of u8 or
   // a u32 is an index to the given word in some array
   const KeyType = meta.Uint(Len, MetaKeyType);
+  // Do we really need to make this u64!
   const ValType = u32;
   const MarkovMap = std.AutoHashMap(KeyType, ValType);
 
@@ -42,10 +43,15 @@ pub fn GenBase(Len: comptime_int, Key: type) type {
 
     /// Increment the value for encountered key
     pub fn increment(self: *Self, key: MetaKeyType) !void {
-      var dest = try self.map.allocator.create(KeyType);
-      @memcpy(&dest, key);
-      const result = try self.map.getOrPut(dest);
-      result.value_ptr.* = if (result.found_existing) result.value_ptr.* + 1 else 0;
+      const result = try self.map.getOrPutAdapted(meta.asUint(Len, key));
+      if (result.found_existing) {
+        result.value_ptr.* += 1;
+      } else {
+        var dest = try self.map.allocator.create(KeyType);
+        @memcpy(&dest, key);
+        result.key_ptr.* = dest;
+        result.value_ptr.* = 0;
+      }
     }
 
     /// Free everything owned by this (Base) object
