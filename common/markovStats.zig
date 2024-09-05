@@ -21,9 +21,10 @@ pub const ModelStats = packed struct {
 };
 
 /// Copies the bytes (this is needed due to alignment, I think!!)
-pub fn fromBytes(bytes: *const [@sizeOf(ModelStats)]u8) ModelStats {
+pub fn fromBytes(data: []const u8) ModelStats {
+  comptime if (data.len < @sizeOf(ModelStats)) @compileError("File too small to be a model");
   var stats: ModelStats = undefined;
-  @memcpy(std.mem.asBytes(&stats), bytes);
+  @memcpy(std.mem.asBytes(&stats), data[0..@sizeOf(ModelStats)]);
   if (std.Target.Cpu.Arch.endian() != stats.endian) std.mem.byteSwapAllFields(ModelStats); 
   return stats;
 }
