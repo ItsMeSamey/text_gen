@@ -32,7 +32,7 @@ fn CharMakov(Len: comptime_int) type {
     /// Writes the data to `writer` does *NOT* deinitialize anything
     pub fn flush(self: *Self, writer: std.io.AnyWriter) void {
       self.base.flush(writer, std.math.maxInt(u8));
-      try writer.writeAll("Char");
+      try writer.writeAll("char");
     }
 
     pub fn deinit(self: *Self) void {

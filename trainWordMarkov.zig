@@ -71,7 +71,7 @@ fn WordMakov(Len: comptime_int) type {
       }
       self.base.flush(writer, self.table.count());
       try writer.writeInt(u64, count, .little);
-      try writer.writeAll("Word");
+      try writer.writeAll("word");
     }
 
     pub fn deinit(self: *Self) void {

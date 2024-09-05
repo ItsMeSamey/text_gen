@@ -1,6 +1,12 @@
 const std = @import("std");
 const meta = @import("meta.zig");
 
+/// The stats struct
+const MarkovModelStats = @import("markovStats.zig").ModelStats;
+
+/// What Endianness is used for the files while storing
+const Endianness = @import("defaults.zig").Endian;
+
 /// A stupidly simple way to make a hash map from integer key values
 fn StupidHashMap(K: type, V: type) type {
   return std.HashMap(K, V, struct {
@@ -22,6 +28,8 @@ fn StupidHashMap(K: type, V: type) type {
   }, std.hash_map.default_max_load_percentage);
 }
 
+/// A base onject to store the frequency of occurrence a sequence
+/// if `Key` is u8, assumes a char markov mode
 pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
   comptime {
     std.debug.assert(Len > 1);
@@ -80,17 +88,20 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
         const intType = std.meta.Int(.unsigned, (intLen+1)*8);
         if (std.math.maxInt(intType) >= parentLen) {
 
+          try writer.writeStructEndian(MarkovModelStats{
+            .entriesLen = list.len,
+            .modelLen = Len,
+            .keyLen = @typeInfo(intType).Int.bits,
+            .valLen = @typeInfo(Val).Int.bits,
+            .modelType = if (Key == u8) .char else .word,
+            .endian = Endianness,
+          }, Endianness);
           for (list) |entry| {
             inline for (0..Len) |i| {
-              try writer.writeInt(Key, entry.k[i], .little);
+              try writer.writeInt(Key, entry.k[i], Endianness);
             }
-            try writer.writeInt(Val, entry.v, .little);
+            try writer.writeInt(Val, entry.v, Endianness);
           }
-          try writer.writeInt(u64, list.len, .little);
-          // Key int len
-          try writer.writeByte(intLen);
-          // Val int len
-          try writer.writeByte(@typeInfo(Val).Int.bits);
           return;
 
         }
