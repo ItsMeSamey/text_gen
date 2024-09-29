@@ -32,7 +32,7 @@ pub fn next(self: *Self) []const u8 {
 
 test Self {
   const print = std.debug.print;
-  var generator: Self = .{ .random = @import("common/rng.zig").random() };
+  var generator: Self = .{ .random = @import("common/word/rng.zig").random() };
 
   // print 4 random words, using .gen()
   print("TEST Self:\n\tgen: ", .{});

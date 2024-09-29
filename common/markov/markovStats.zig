@@ -6,8 +6,6 @@ const ModelType = enum(u1) {
 };
 
 pub const ModelStats = packed struct {
-  /// Number of entries in the Model
-  entriesLen: u64,
   /// The length of the chain
   modelLen: u8,
   /// Size of the `Key` integer
@@ -31,7 +29,6 @@ pub fn fromBytes(data: []const u8) ModelStats {
 
 test {
   const stat: ModelStats = .{
-    .entriesLen = 0,
     .modelLen = 1,
     .keyLen = 2,
     .valLen = 3,

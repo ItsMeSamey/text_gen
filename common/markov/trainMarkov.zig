@@ -89,13 +89,13 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
         if (std.math.maxInt(intType) >= parentLen) {
 
           try writer.writeStructEndian(MarkovModelStats{
-            .entriesLen = list.len,
             .modelLen = Len,
             .keyLen = @typeInfo(intType).Int.bits,
             .valLen = @typeInfo(Val).Int.bits,
             .modelType = if (Key == u8) .char else .word,
             .endian = Endianness,
           }, Endianness);
+          try writer.writeInt(u64, list.len, Endianness);
           for (list) |entry| {
             inline for (0..Len) |i| {
               try writer.writeInt(Key, entry.k[i], Endianness);
