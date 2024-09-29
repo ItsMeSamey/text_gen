@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const ModelType = enum(u1) {
+const ModelType = enum {
   char,
   word,
 };
@@ -13,7 +13,7 @@ pub const ModelStats = packed struct {
   /// Size of the `Val` integer
   valLen: u8,
   /// If this is a `char` or `word` model
-  modelType: ModelType,
+  wordModel: bool,
   /// Is this file little or big endian (hope that this variable is not affected by endianness)
   littleEndian: bool,
 
@@ -22,25 +22,28 @@ pub const ModelStats = packed struct {
       .modelLen = chainLen,
       .keyLen = @typeInfo(keyType).int.bits,
       .valLen = @typeInfo(valType).int.bits,
-      .modelType = modelType,
-      .endian = endianness,
+      .wordModel = modelType == .word,
+      .littleEndian = endianness == .little,
     };
   }
 
   /// Copies the bytes (this is needed due to alignment, I think!)
-  pub fn fromBytes(data: []const u8) ModelStats {
-    comptime if (data.len < @sizeOf(ModelStats)) @compileError("File too small to be a model");
+  pub fn fromBytes(data: []const u8) !ModelStats {
+    if (data.len < @sizeOf(ModelStats)) return error.FileTooSmall;
     var stats: ModelStats = undefined;
     @memcpy(std.mem.asBytes(&stats), data[0..@sizeOf(ModelStats)]);
-    if (std.Target.Cpu.Arch.endian() != stats.endian) std.mem.byteSwapAllFields(ModelStats); 
+
+    // NOTE: This is currently not needed as all fields are one byte
+    // if ((@import("builtin").target.cpu.arch.endian() == .little) != stats.littleEndian) std.mem.byteSwapAllFields(ModelStats); 
+
     return stats;
   }
 };
 
 test {
-  const stat = ModelStats.init(1, u8, u8, .char, @import("defaults.zig").Endian == .little);
+  const stat = ModelStats.init(1, u8, u8, .char, @import("defaults.zig").Endian);
   const statBytes = std.mem.asBytes(&stat);
-  const back = ModelStats.fromBytes(statBytes);
+  const back = try ModelStats.fromBytes(statBytes);
 
   // std.debug.print("{any}\n{any}\n", .{statBytes, std.mem.asBytes(&back)});
 
