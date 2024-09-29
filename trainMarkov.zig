@@ -86,7 +86,7 @@ fn WordMakov(Len: comptime_int) type {
 }
 
 fn CharMakov(Len: comptime_int) type {
-  const Base = GenBase(Len, u8);
+  const Base = GenBase(Len, u8, u32);
 
   return struct {
     /// The base containing the modal

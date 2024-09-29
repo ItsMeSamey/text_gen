@@ -34,11 +34,11 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
   comptime {
     std.debug.assert(Len > 1);
 
-    std.debug.assert(@typeInfo(Key).Int.signedness == .unsigned);
-    std.debug.assert(@typeInfo(Key).Int.bits <= std.math.maxInt(u8));
+    std.debug.assert(@typeInfo(Key).int.signedness == .unsigned);
+    std.debug.assert(@typeInfo(Key).int.bits <= std.math.maxInt(u8));
 
-    std.debug.assert(@typeInfo(Val).Int.signedness == .unsigned);
-    std.debug.assert(@typeInfo(Val).Int.bits <= std.math.maxInt(u8));
+    std.debug.assert(@typeInfo(Val).int.signedness == .unsigned);
+    std.debug.assert(@typeInfo(Val).int.bits <= std.math.maxInt(u8));
   } 
 
   const kvp = struct { k: [Len]Key, v: Val };
@@ -88,13 +88,11 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
         const intType = std.meta.Int(.unsigned, (intLen+1)*8);
         if (std.math.maxInt(intType) >= parentLen) {
 
-          try writer.writeStructEndian(MarkovModelStats{
-            .modelLen = Len,
-            .keyLen = @typeInfo(intType).Int.bits,
-            .valLen = @typeInfo(Val).Int.bits,
-            .modelType = if (Key == u8) .char else .word,
-            .endian = Endianness,
-          }, Endianness);
+          try writer.writeStructEndian(
+            MarkovModelStats.init(Len, intType, Val, if (Key == u8) .char else .word, Endianness),
+            Endianness,
+          );
+
           try writer.writeInt(u64, list.len, Endianness);
           for (list) |entry| {
             inline for (0..Len) |i| {
