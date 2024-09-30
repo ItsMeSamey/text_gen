@@ -28,15 +28,17 @@ pub const rngFns = struct {
     return random.uintLessThanBiased(halfusize, max);
   }
 
-  /// Fast square root approximation, returns 2*sqrt(2*val)
+  /// Fast square root approximation
   /// inspired from the quake implementation
+  /// k=0.064450048 // minimize Integral (0 to 1) of `f(x) = abs(log2(1+x) - x - k)`
+  /// err term = (1023-k) * 2^51 = 2303446080793930299
   fn fsqrt(val: u64) u32 {
     @setRuntimeSafety(false);
     @setFloatMode(std.builtin.FloatMode.optimized);
-    var i: u32 = @bitCast(@as(f64, @floatFromInt(val*2)));
-    i = (532316755 + (i >> 1)) & ~@as(u32, (1<<31));
-    i = @intFromFloat(@as(f32, @bitCast(i)));
-    return i*2;
+    var i: u64 = @bitCast(@as(f64, @floatFromInt(val)));
+    i = (2303446080793930299 + (i >> 1)) & ~@as(u64, (1<<61));
+    i = @intFromFloat(@as(f64, @bitCast(i)));
+    return @truncate(i);
   }
 
   /// limit the fsqrt result
@@ -45,18 +47,30 @@ pub const rngFns = struct {
   }
 
   /// Sqrt based rng to generate smaller numbers more frequently
-  pub fn sqrtMax(random: std.Random, _: halfusize, max: halfusize) halfusize {
+  pub fn sqrt(random: std.Random, _: halfusize, max: halfusize) halfusize {
+    @setRuntimeSafety(false);
     return limitedSqrt(random.uintLessThanBiased(u64, @as(u64, max) * @as(u64, max)), max);
   }
 
-  /// Uses prev as well as max for rng
-  pub fn sqrtPrevMax(random: std.Random, prev: halfusize, max: halfusize) halfusize {
-    return limitedSqrt(random.uintLessThanBiased(u64, @as(u64, prev+1) * @as(u64, max)), max);
+  /// Seem more natural
+  pub fn sqrtPrevMax_1(random: std.Random, prev: halfusize, max: halfusize) halfusize {
+    @setRuntimeSafety(false);
+    return limitedSqrt(random.uintLessThanBiased(u64, 1024 * @as(u64, (prev+1)) * @as(u64, max)), max);
+  }
+  pub fn sqrtPrevMax_2(random: std.Random, prev: halfusize, max: halfusize) halfusize {
+    @setRuntimeSafety(false);
+    return limitedSqrt(random.uintLessThanBiased(u64, @as(u64, prev +| max/2) * @as(u64, max)), max);
   }
 
-  /// Uses previous value instead of max
-  pub fn sqrtPrev(random: std.Random, prev: halfusize, max: halfusize) halfusize {
-    return limitedSqrt(random.uintLessThanBiased(u64, @as(u64, prev+1) * @as(u64, prev+1)), max);
+  /// repeats words sometimes
+  pub fn sqrtPrev_1(random: std.Random, prev: halfusize, max: halfusize) halfusize {
+    @setRuntimeSafety(false);
+    return limitedSqrt(random.uintLessThanBiased(u64, @as(u64, prev +| (max-prev)/2) * @as(u64, prev+1024) * 2) * 32, max);
+  }
+  /// Aloto x ?
+  pub fn sqrtPrev_2(random: std.Random, prev: halfusize, max: halfusize) halfusize {
+    @setRuntimeSafety(false);
+    return limitedSqrt(random.uintLessThanBiased(u64, @as(u64, prev +| (max-prev)/2) * @as(u64, prev+1024) * 64) * 4, max);
   }
 };
 
@@ -64,8 +78,18 @@ pub const rngFns = struct {
 pub const ComptimeOptions = struct {
   /// Random word generation function
   /// This is useful because the default data is ordered by frequency of usages in english
-  /// the return value __MUST__ return value less than `dataLen`
-  rngFn: fn (random: std.Random, prevPos: halfusize, dataLen: halfusize) halfusize = rngFns.linear,
+  /// the return value __MUST__ return value less than `max`
+  rngFn: fn (random: std.Random, prev: halfusize, max: halfusize) halfusize = struct {
+    const functions = @typeInfo(rngFns).@"struct".decls;
+    const len = functions.len;
+    /// The default function, calls one of randomly selected functions every call
+    fn func(random: std.Random, prev: halfusize, max: halfusize) halfusize {
+      return switch(random.uintLessThanBiased(u32, len)) {
+        inline 0...(len-1) => |i| @field(rngFns, functions[i].name)(random, prev, max),
+        else => unreachable,
+      };
+    }
+  }.func,
 
   /// If you never need to use the default wordGenerator, set this to empty string,
   /// this prevents inclusion of useless data
@@ -152,10 +176,14 @@ fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
 }
 
 fn @"test GenWords"() void {
-  var generator = GetWordGen(.{.rngFn = rngFns.sqrtMax}).default();
+  var generator = GetWordGen(.{}).default();
 
   std.debug.print("TEST (GenWordGen):\n\tWORDS: ", .{});
   for (0..1024) |_|{ std.debug.print("{s} ", .{generator.gen()}); }
+
+  const x = generator.options.data.len;
+  std.debug.print("\n\t{d} from {d}", .{rngFns.fsqrt(x*x), x});
+
   std.debug.print("\n", .{});
 }
 
