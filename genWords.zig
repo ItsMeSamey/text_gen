@@ -43,6 +43,7 @@ pub const rngFns = struct {
 
   /// limit the fsqrt result
   fn limitedSqrt(val: u64, max: halfusize) halfusize {
+    @setRuntimeSafety(false);
     return std.Random.limitRangeBiased(halfusize, @truncate(fsqrt(val)), max);
   }
 
@@ -59,18 +60,18 @@ pub const rngFns = struct {
   }
   pub fn sqrtPrevMax_2(random: std.Random, prev: halfusize, max: halfusize) halfusize {
     @setRuntimeSafety(false);
-    return limitedSqrt(random.uintLessThanBiased(u64, @as(u64, prev +| max/2) * @as(u64, max)), max);
+    return limitedSqrt(random.uintLessThanBiased(u64, @as(u64, prev + max/2) * @as(u64, max)), max);
   }
 
   /// repeats words sometimes
   pub fn sqrtPrev_1(random: std.Random, prev: halfusize, max: halfusize) halfusize {
     @setRuntimeSafety(false);
-    return limitedSqrt(random.uintLessThanBiased(u64, @as(u64, prev +| (max-prev)/2) * @as(u64, prev+1024) * 2) * 32, max);
+    return limitedSqrt(random.uintLessThanBiased(u64, @as(u64, prev + (max-prev)/2) * @as(u64, prev+1024) * 2) * 32, max);
   }
   /// Aloto x ?
   pub fn sqrtPrev_2(random: std.Random, prev: halfusize, max: halfusize) halfusize {
     @setRuntimeSafety(false);
-    return limitedSqrt(random.uintLessThanBiased(u64, @as(u64, prev +| (max-prev)/2) * @as(u64, prev+1024) * 64) * 4, max);
+    return limitedSqrt(random.uintLessThanBiased(u64, @as(u64, prev + (max-prev)/2) * @as(u64, prev+1024) * 64) * 4, max);
   }
 };
 
