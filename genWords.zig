@@ -176,20 +176,12 @@ fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
   };
 }
 
-fn @"test GenWords"() void {
+test GetWordGen {
   var generator = GetWordGen(.{}).default();
 
   std.debug.print("TEST (GenWordGen):\n\tWORDS: ", .{});
   for (0..1024) |_|{ std.debug.print("{s} ", .{generator.gen()}); }
-
-  const x = generator.options.data.len;
-  std.debug.print("\n\t{d} from {d}", .{rngFns.fsqrt(x*x), x});
-
   std.debug.print("\n", .{});
-}
-
-test GetWordGen {
-  @"test GenWords"();
 
   std.testing.refAllDecls(rngFns);
   std.testing.refAllDecls(ComptimeOptions);
