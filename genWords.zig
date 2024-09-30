@@ -1,15 +1,71 @@
 const std = @import("std");
 const OptionalStruct = @import("common/word/meta.zig").OptionalStruct;
 
+pub const halfusize = std.meta.Int(.unsigned, @bitSizeOf(usize)/2);
+
+/// These are the rng function you can use for wordGenerator
+/// All of these are biased (YES even linear)
+/// NOTE: sqrt based implementation dont return full integer range always
+pub const rngFns = struct {
+  /// NOTE: using addition can overflow. Therefor, undefined behaviour is used here.
+  /// this however is possibly a bad idea as behaviour of while program may be undefined.
+  pub fn incrementalSum(random: std.Random, prev: halfusize, max: halfusize) halfusize {
+    const randomInt = random.int(halfusize);
+    const sum = init: {
+      @setRuntimeSafety(false);
+      break :init prev + randomInt;
+    };
+    return std.Random.limitRangeBiased(halfusize, sum, max);
+  }
+
+  /// Uses xor instead of sum
+  pub fn incrementalXor(random: std.Random, prev: halfusize, max: halfusize) halfusize {
+    return std.Random.limitRangeBiased(halfusize, prev ^ random.int(halfusize), max);
+  }
+
+  /// Simplest random number
+  pub fn linear(random: std.Random, _: halfusize, max: halfusize) halfusize {
+    return random.uintLessThanBiased(halfusize, max);
+  }
+
+  /// Fast square root approximation, returns 2*sqrt(2*val)
+  /// inspired from the quake implementation
+  fn fsqrt(val: u64) u32 {
+    @setRuntimeSafety(false);
+    @setFloatMode(std.builtin.FloatMode.optimized);
+    var i: u32 = @bitCast(@as(f64, @floatFromInt(val*2)));
+    i = (532316755 + (i >> 1)) & ~@as(u32, (1<<31));
+    i = @intFromFloat(@as(f32, @bitCast(i)));
+    return i*2;
+  }
+
+  /// limit the fsqrt result
+  fn limitedSqrt(val: u64, max: halfusize) halfusize {
+    return std.Random.limitRangeBiased(halfusize, @truncate(fsqrt(val)), max);
+  }
+
+  /// Sqrt based rng to generate smaller numbers more frequently
+  pub fn sqrtMax(random: std.Random, _: halfusize, max: halfusize) halfusize {
+    return limitedSqrt(random.uintLessThanBiased(u64, @as(u64, max) * @as(u64, max)), max);
+  }
+
+  /// Uses prev as well as max for rng
+  pub fn sqrtPrevMax(random: std.Random, prev: halfusize, max: halfusize) halfusize {
+    return limitedSqrt(random.uintLessThanBiased(u64, @as(u64, prev+1) * @as(u64, max)), max);
+  }
+
+  /// Uses previous value instead of max
+  pub fn sqrtPrev(random: std.Random, prev: halfusize, max: halfusize) halfusize {
+    return limitedSqrt(random.uintLessThanBiased(u64, @as(u64, prev+1) * @as(u64, prev+1)), max);
+  }
+};
+
 /// The Argument to `GetWordGen` function
-const ComptimeOptions = struct {
+pub const ComptimeOptions = struct {
   /// Random word generation function
   /// This is useful because the default data is ordered by frequency of usages in english
-  rngFn: fn (random: std.Random, prevPos: usize, wordLen: usize) usize = struct {
-    fn func(random: std.Random, prevPos: usize, _: usize) usize {
-      return prevPos ^ random.int(usize);
-    }
-  }.func,
+  /// the return value __MUST__ return value less than `dataLen`
+  rngFn: fn (random: std.Random, prevPos: halfusize, dataLen: halfusize) halfusize = rngFns.linear,
 
   /// If you never need to use the default wordGenerator, set this to empty string,
   /// this prevents inclusion of useless data
@@ -18,7 +74,7 @@ const ComptimeOptions = struct {
 
 fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
   return struct {
-    at: usize = 0,
+    at: halfusize = 0,
     /// index for last random word generated
     options: WordGenOptions,
 
@@ -76,8 +132,8 @@ fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
 
     /// Return a random word from `self.data`.
     pub fn gen(self: *Self) []const u8 {
-      self.at = @mod(comptimeOptions.rngFn(self.options.random, self.at, self.options.data.len), self.options.data.len);
-      self.at = if (std.mem.indexOfScalarPos(u8, self.options.data, self.at, '\x00')) |idx| idx + 1 else 0;
+      self.at = comptimeOptions.rngFn(self.options.random, self.at, @truncate(self.options.data.len));
+      self.at = if (std.mem.indexOfScalarPos(u8, self.options.data, self.at, '\x00')) |idx| @truncate(idx + 1) else 0;
 
       // Return the next word, not the one we are currently inside. This is "more" random (I think!).
       return self.next();
@@ -89,21 +145,25 @@ fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
     pub fn next(self: *Self) []const u8 {
       const start = self.at;
       const end = std.mem.indexOfScalarPos(u8, self.options.data, self.at, '\x00') orelse self.options.data.len;
-      defer self.at = if (end + 1 < self.options.data.len) end + 1 else 0;
+      defer self.at = if (end + 1 < self.options.data.len) @truncate(end + 1) else 0;
       return self.options.data[start..end];
     }
   };
 }
 
 fn @"test GenWords"() void {
-  var generator = GetWordGen(.{}).default();
+  var generator = GetWordGen(.{.rngFn = rngFns.sqrtMax}).default();
 
   std.debug.print("TEST (GenWordGen):\n\tWORDS: ", .{});
-  for (0..4) |_|{ std.debug.print("{s} ", .{generator.gen()}); }
+  for (0..1024) |_|{ std.debug.print("{s} ", .{generator.gen()}); }
   std.debug.print("\n", .{});
 }
 
 test GetWordGen {
   @"test GenWords"();
+
+  std.testing.refAllDecls(rngFns);
+  std.testing.refAllDecls(ComptimeOptions);
+  std.testing.refAllDeclsRecursive(GetWordGen(.{}));
 }
 

@@ -1,5 +1,4 @@
 const std = @import("std");
-
 const GenBase = @import("common/markov/trainMarkov.zig").GenBase;
 
 const strEq = @import("common/markov/stringComparer.zig").strEq;
