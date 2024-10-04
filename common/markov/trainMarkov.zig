@@ -87,21 +87,16 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
       inline for (0..8) |intLen| {
         const intType = std.meta.Int(.unsigned, (intLen+1)*8);
         if (std.math.maxInt(intType) >= parentLen) {
+          try MarkovModelStats.init(Len, intType, Val, if (Key == u8) .char else .word, Endianness)
+            .flush(writer);
 
-          try writer.writeStructEndian(
-            MarkovModelStats.init(Len, intType, Val, if (Key == u8) .char else .word, Endianness),
-            Endianness,
-          );
+          try writer.writeInt(u64, std.mem.asBytes(list).len, Endianness);
 
-          try writer.writeInt(u64, list.len, Endianness);
           for (list) |entry| {
-            inline for (0..Len) |i| {
-              try writer.writeInt(Key, entry.k[i], Endianness);
-            }
+            inline for (0..Len) |i| { try writer.writeInt(Key, entry.k[i], Endianness); }
             try writer.writeInt(Val, entry.v, Endianness);
           }
           return;
-
         }
       }
       unreachable;
@@ -118,9 +113,11 @@ const BaseU8 = GenBase(2, u8, u32);
 const BaseU32 = GenBase(2, u32, u32);
 
 test {
+  std.testing.refAllDecls(BaseU8);
   var baseU8 = BaseU8.init(std.testing.allocator);
   try baseU8.flush(std.io.null_writer.any(), 0xff);
 
+  std.testing.refAllDecls(BaseU32);
   var baseU32 = BaseU32.init(std.testing.allocator);
   try baseU32.flush(std.io.null_writer.any(), 0xffff);
 }

@@ -65,14 +65,13 @@ fn WordMakov(Len: comptime_int) type {
 
     /// Writes the data to `writer` does *NOT* deinitialize anything
     pub fn flush(self: *Self, writer: std.io.AnyWriter) void {
+      self.base.flush(writer, self.table.count());
       var count: u64 = 0;
       for (self.table.keys()) |key| {
         count += 1;
         try writer.writeAll(key);
       }
-      self.base.flush(writer, self.table.count());
       try writer.writeInt(u64, count, .little);
-      try writer.writeAll("word");
     }
 
     pub fn deinit(self: *Self) void {
@@ -113,7 +112,6 @@ fn CharMakov(Len: comptime_int) type {
     /// Writes the data to `writer` does *NOT* deinitialize anything
     pub fn flush(self: *Self, writer: std.io.AnyWriter) void {
       self.base.flush(writer, std.math.maxInt(u8));
-      try writer.writeAll("char");
     }
 
     pub fn deinit(self: *Self) void {

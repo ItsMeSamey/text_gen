@@ -97,7 +97,7 @@ pub const ComptimeOptions = struct {
   defaultData: []const u8 = @embedFile("./data/words.txt"),
 };
 
-fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
+pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
   return struct {
     at: halfusize = 0,
     /// index for last random word generated

@@ -27,8 +27,12 @@ pub const ModelStats = packed struct {
     };
   }
 
+  pub fn flush(self: ModelStats,writer: std.io.AnyWriter, ) !void {
+    return writer.writeStructEndian(self, if (self.littleEndian) .little else .big);
+  }
+
   /// Copies the bytes (this is needed due to alignment, I think!)
-  pub fn fromBytes(data: []const u8) !ModelStats {
+  pub fn fromBytes(data: []const u8) ModelStats {
     if (data.len < @sizeOf(ModelStats)) return error.FileTooSmall;
     var stats: ModelStats = undefined;
     @memcpy(std.mem.asBytes(&stats), data[0..@sizeOf(ModelStats)]);
