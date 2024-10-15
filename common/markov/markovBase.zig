@@ -39,19 +39,21 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
 
     std.debug.assert(@typeInfo(Val).int.signedness == .unsigned);
     std.debug.assert(@typeInfo(Val).int.bits <= std.math.maxInt(u8));
-  } 
+  }
 
+  // Done this way so we can easily sort the keys array without copying
   const kvp = struct { k: [Len]Key, v: Val };
   const MarkovMap = std.ArrayHashMap(kvp, void, struct {
     pub fn hash(_: @This(), k: kvp) u64 {
       return std.hash_map.getAutoHashFn([Len]Key, @This())(k.k);
     }
     pub fn eql(_: @This(), a: kvp, b: kvp) bool {
-      return meta.asUint(Len, a) == meta.asUint(Len, b);
+      return meta.asUint(Len, a.k) == meta.asUint(Len, b.k);
     }
   }, @sizeOf([Len]Key) <= std.simd.suggestVectorLength(u8) orelse @sizeOf(usize));
+
   return struct {
-    /// Count of The markove chain 
+    /// Count of The markove chain
     map: MarkovMap,
 
     const Self = @This();
@@ -70,10 +72,10 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
 
     /// Convert the `self.map` to a sorted array. `self.map` may *NOT* be used after this point
     fn SortedList(self: *Self) []kvp {
-      const list = self.map.unmanaged.keys();
+      const list = self.map.keys();
 
       std.sort.pdq(kvp, list, {}, struct {
-        pub fn function(_: void, lhs: kvp, rhs: kvp) bool { 
+        pub fn function(_: void, lhs: kvp, rhs: kvp) bool {
           return meta.asUint(Len, &lhs.k) < meta.asUint(Len, &rhs.k);
         }
       }.function);
@@ -82,24 +84,17 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
 
     /// Writes the data to `writer` does *NOT* deinitialize anything
     /// `parentLen` is always 255 for char, and length of word list for words
-    pub fn flush(self: *Self, writer: std.io.AnyWriter, parentLen: usize) !void {
+    pub fn flush(self: *Self, writer: std.io.AnyWriter, comptime MinKeyType: type) !void {
       const list = self.SortedList();
-      inline for (0..8) |intLen| {
-        const intType = std.meta.Int(.unsigned, (intLen+1)*8);
-        if (std.math.maxInt(intType) >= parentLen) {
-          try MarkovModelStats.init(Len, intType, Val, if (Key == u8) .char else .word, Endianness)
-            .flush(writer);
+      try MarkovModelStats.init(Len, MinKeyType, Val, if (Key == u8) .char else .word, Endianness)
+        .flush(writer);
 
-          try writer.writeInt(u64, std.mem.asBytes(list).len, Endianness);
+      try writer.writeInt(u64, std.mem.asBytes(list).len, Endianness);
 
-          for (list) |entry| {
-            inline for (0..Len) |i| { try writer.writeInt(Key, entry.k[i], Endianness); }
-            try writer.writeInt(Val, entry.v, Endianness);
-          }
-          return;
-        }
+      for (list) |entry| {
+        inline for (0..Len) |i| { try writer.writeInt(Key, entry.k[i], Endianness); }
+        try writer.writeInt(Val, entry.v, Endianness);
       }
-      unreachable;
     }
 
     /// Free everything owned by this (Base) object
@@ -109,10 +104,10 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
   };
 }
 
-const BaseU8 = GenBase(2, u8, u32);
-const BaseU32 = GenBase(2, u32, u32);
-
 test {
+  const BaseU8 = GenBase(2, u8, u32);
+  const BaseU32 = GenBase(2, u32, u32);
+
   std.testing.refAllDecls(BaseU8);
   var baseU8 = BaseU8.init(std.testing.allocator);
   try baseU8.flush(std.io.null_writer.any(), 0xff);

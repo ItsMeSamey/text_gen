@@ -60,7 +60,7 @@ fn testList(Len: comptime_int, BufLen: comptime_int) !void {
   inline for (0..BufLen+(Len/2)) |i| {
     list.push(i);
   }
-  
+
   const slice = list.getSlice();
   inline for (BufLen+(Len/2)-Len..BufLen+(Len/2), 0..) |v, i| {
     try std.testing.expect(v == slice[i]);

@@ -1,15 +1,52 @@
 const std = @import("std");
-const GenBase = @import("common/markov/trainMarkov.zig").GenBase;
+const GenBase = @import("common/markov/markovBase.zig").GenBase;
 
-const strEq = @import("common/markov/stringComparer.zig").strEq;
-const strHash = std.hash_map.hashString;
 
-const Table = std.ArrayHashMap([]const u8, u32, struct {
-  pub fn eql(_: @This(), a: []const u8, b: []const u8) bool { return strEq(a, b); }
-  pub fn hash(_: @This(), a: []const u8) u64 { return strHash(a); }
-}, true);
+fn CharMakov(Len: comptime_int) type {
+  const Base = GenBase(Len, u8, u32);
+
+  return struct {
+    /// The base containing the modal
+    base: Base,
+
+    const Self = @This();
+
+    /// Create the instance of `@This()` object
+    pub fn init(allocator: std.mem.Allocator) type {
+      return .{ .base = Base.init(allocator) };
+    }
+
+    /// You can call this multiple times to train with multiple files.
+    /// WARNING: Data must Not be deleted/free'd during for the lifetime of `self`
+    /// `owner` must be null if data is not allocated, or you want to keep ownership of the data.
+    /// `owner` is used to free memory when deinit is called.
+    pub fn train(self: *Self, data: []const u8, owner: ?std.mem.Allocator) !void {
+      if (data.len < Len) return error.InsufficientData;
+      if (owner != null) { try self.base.storeFreeable(data, owner.?); }
+      for (0..data.len-(Len-1)) |i| {
+        try self.base.increment(data[i..i+Len]);
+      }
+    }
+
+    /// Writes the data to `writer` does *NOT* deinitialize anything
+    pub fn flush(self: *Self, writer: std.io.AnyWriter) void {
+      self.base.flush(writer, u8);
+    }
+
+    pub fn deinit(self: *Self) void {
+      self.base.deinit();
+    }
+  };
+}
 
 fn WordMakov(Len: comptime_int) type {
+  const strEq = @import("common/markov/stringComparer.zig").strEq;
+  const strHash = std.hash_map.hashString;
+
+  const Table = std.ArrayHashMap([]const u8, u32, struct {
+    pub fn eql(_: @This(), a: []const u8, b: []const u8) bool { return strEq(a, b); }
+    pub fn hash(_: @This(), a: []const u8) u64 { return strHash(a); }
+  }, true);
   const CyclicList = @import("common/markov/cyclicList.zig").GenCyclicList(Len, []const u8);
   const Base = GenBase(Len, u32, u32);
 
@@ -65,7 +102,17 @@ fn WordMakov(Len: comptime_int) type {
 
     /// Writes the data to `writer` does *NOT* deinitialize anything
     pub fn flush(self: *Self, writer: std.io.AnyWriter) void {
-      self.base.flush(writer, self.table.count());
+      if (std.math.maxInt(u64) < self.table.count()) {
+        @panic("Table too large!");
+      }
+
+      inline for (0..8) |intLen| {
+        const intType = std.meta.Int(.unsigned, (intLen+1)*8);
+        if (std.math.maxInt(intType) >= self.table.count()) {
+          self.base.flush(writer, intType);
+        }
+      }
+
       var count: u64 = 0;
       for (self.table.keys()) |key| {
         count += 1;
@@ -83,51 +130,8 @@ fn WordMakov(Len: comptime_int) type {
   };
 }
 
-fn CharMakov(Len: comptime_int) type {
-  const Base = GenBase(Len, u8, u32);
-
-  return struct {
-    /// The base containing the modal
-    base: Base,
-
-    const Self = @This();
-
-    /// Create the instance of `@This()` object
-    pub fn init(allocator: std.mem.Allocator) type {
-      return .{ .base = Base.init(allocator) };
-    }
-
-    /// You can call this multiple times to train with multiple files.
-    /// WARNING: Data must Not be deleted/free'd during for the lifetime of `self`
-    /// `owner` must be null if data is not allocated, or you want to keep ownership of the data.
-    /// `owner` is used to free memory when deinit is called.
-    pub fn train(self: *Self, data: []const u8, owner: ?std.mem.Allocator) !void {
-      if (data.len < Len) return error.InsufficientData;
-      if (owner != null) { try self.base.storeFreeable(data, owner.?); }
-      for (0..data.len-(Len-1)) |i| {
-        try self.base.increment(data[i..i+Len]);
-      }
-    }
-
-    /// Writes the data to `writer` does *NOT* deinitialize anything
-    pub fn flush(self: *Self, writer: std.io.AnyWriter) void {
-      self.base.flush(writer, std.math.maxInt(u8));
-    }
-
-    pub fn deinit(self: *Self) void {
-      self.base.deinit();
-    }
-  };
-}
-
 test {
-  {
-    const s: CharMakov(4) = undefined;
-    _ = s;
-  }
-  {
-    const s: WordMakov(4) = undefined;
-    _ = s;
-  }
+  std.testing.refAllDecls(CharMakov(4));
+  std.testing.refAllDecls(WordMakov(4));
 }
 

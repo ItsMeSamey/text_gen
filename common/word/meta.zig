@@ -5,7 +5,7 @@ pub fn Optional(comptime T: type) type {
     .optional => T,
     else => @Type(.{ .optional = .{.child = T} }),
   };
-} 
+}
 
 const nullVal = @typeInfo(struct { @"void": ?void = null }).@"struct".fields[0].default_value;
 

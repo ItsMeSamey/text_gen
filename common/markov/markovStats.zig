@@ -38,7 +38,7 @@ pub const ModelStats = packed struct {
     @memcpy(std.mem.asBytes(&stats), data[0..@sizeOf(ModelStats)]);
 
     // NOTE: This is currently not needed as all fields are one byte
-    // if ((@import("builtin").target.cpu.arch.endian() == .little) != stats.littleEndian) std.mem.byteSwapAllFields(ModelStats); 
+    // if ((@import("builtin").target.cpu.arch.endian() == .little) != stats.littleEndian) std.mem.byteSwapAllFields(ModelStats);
 
     return stats;
   }
