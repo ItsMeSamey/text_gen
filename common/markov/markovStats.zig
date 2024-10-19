@@ -1,9 +1,5 @@
 const std = @import("std");
 
-const ModelType = enum {
-  char,
-  word,
-};
 
 pub const ModelStats = packed struct {
   /// The length of the chain
@@ -12,23 +8,26 @@ pub const ModelStats = packed struct {
   keyLen: u8,
   /// Size of the `Val` integer
   valLen: u8,
-  /// If this is a `char` or `word` model
-  wordModel: bool,
+  /// If this is a `word` model
+  isWord: bool,
   /// Is this file little or big endian (hope that this variable is not affected by endianness)
   littleEndian: bool,
 
-  pub fn init(chainLen: u8, keyType: type, valType: type, modelType: ModelType, endianness: std.builtin.Endian) ModelStats {
+  pub fn init(chainLen: u8, keyType: type, valType: type, isWord: bool, endianness: std.builtin.Endian) ModelStats {
     return .{
       .modelLen = chainLen,
       .keyLen = @typeInfo(keyType).int.bits,
       .valLen = @typeInfo(valType).int.bits,
-      .wordModel = modelType == .word,
+      .isWord = isWord,
       .littleEndian = endianness == .little,
     };
   }
 
-  pub fn flush(self: ModelStats,writer: std.io.AnyWriter, ) !void {
-    return writer.writeStructEndian(self, if (self.littleEndian) .little else .big);
+  pub fn flush(self: ModelStats, writer: std.io.AnyWriter) !void {
+    return writer.writeStruct(self);
+
+    // NOTE: This is currently not needed as all fields are one byte
+    // return writer.writeStructEndian(self, if (self.littleEndian) .little else .big);
   }
 
   /// Copies the bytes (this is needed due to alignment, I think!)
@@ -48,8 +47,6 @@ test {
   const stat = ModelStats.init(1, u8, u8, .char, @import("defaults.zig").Endian);
   const statBytes = std.mem.asBytes(&stat);
   const back = try ModelStats.fromBytes(statBytes);
-
-  // std.debug.print("{any}\n{any}\n", .{statBytes, std.mem.asBytes(&back)});
 
   try std.testing.expect(std.meta.eql(stat, back));
 }

@@ -15,6 +15,10 @@ pub fn asUint(comptime len: comptime_int, slice: anytype) Uint(len, @TypeOf(slic
   return @bitCast(nonSentinel[0..len].*);
 }
 
+pub fn arrAsUint(arr: anytype) Uint(arr.len, @TypeOf(arr)) {
+  return asUint(arr.len, arr);
+}
+
 /// Similar to std.math.compare but is more deneric
 pub fn compare(a: anytype, comptime op: std.math.CompareOperator, b: anytype) @TypeOf(a == b) {
   return switch (op) {
