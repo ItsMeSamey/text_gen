@@ -12,6 +12,7 @@ const nullVal = @typeInfo(struct { @"void": ?void = null }).@"struct".fields[0].
 pub fn OptionalStruct(comptime T: type) type {
   const info = @typeInfo(T).@"struct";
   comptime var fields: []const std.builtin.Type.StructField = &.{};
+
   for (info.fields) |f| {
     const optionalFtype = Optional(f.type);
     fields = fields ++ [_]std.builtin.Type.StructField{

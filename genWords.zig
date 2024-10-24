@@ -101,12 +101,12 @@ pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
   return struct {
     at: halfusize = 0,
     /// index for last random word generated
-    options: WordGenOptions,
+    options: Options,
 
     const Self = @This();
 
     /// Options passed to the init function
-    pub const WordGenOptions = struct {
+    pub const Options = struct {
       /// RNG device used for random index generation
       random: std.Random,
       /// The data for generating words. Must be delimited by '\x00'
@@ -121,17 +121,12 @@ pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
     };
 
     /// Options are same as `WordGenOptions` except all the fields are optinonal
-    pub const OptionalWordGenOptions = OptionalStruct(WordGenOptions);
+    pub const OptionalOptions = OptionalStruct(Options);
 
-    inline fn getDefault() Self {
-      return .{
-        .options = WordGenOptions.default(),
-      };
-    }
-
-    /// Get a default initialized generator
-    pub fn default() Self {
-      if (comptimeOptions.defaultData.len == 0) {
+    /// Initialize with given options.
+    /// If the all options are null (i.e. `.{}`), it's better (faster) to use `default()` instead
+    pub fn init(_: std.mem.Allocator, options: OptionalOptions) Self {
+      if (comptimeOptions.defaultData.len == 0 and options.data == null) {
         const s = @src();
         @panic(
           "function `" ++ s.fn_name ++ "` in file " ++ s.file ++ ":" ++ std.fmt.comptimePrint("{d}", .{s.line}) ++
@@ -139,15 +134,12 @@ pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
         );
       }
 
-      return getDefault();
-    }
+      var retval = Self {
+        .options = Options.default(),
+      };
 
-    /// Initialize with given options.
-    /// If the all options are null (i.e. `.{}`), it's better (faster) to use `default()` instead
-    pub fn init(options: OptionalWordGenOptions) Self {
-      var retval = getDefault();
       // assign all non null fields to `retval.options`
-      inline for (std.meta.fields(OptionalWordGenOptions)) |f| {
+      inline for (std.meta.fields(OptionalOptions)) |f| {
         if (@field(options, f.name) != null) {
           @field(retval.options, f.name) = @field(options, f.name).?;
         }
@@ -177,7 +169,7 @@ pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
 }
 
 test GetWordGen {
-  var generator = GetWordGen(.{}).default();
+  var generator = GetWordGen(.{}).init(.{});
 
   std.debug.print("TEST (GenWordGen):\n\tWORDS: ", .{});
   for (0..1024) |_|{ std.debug.print("{s} ", .{generator.gen()}); }
