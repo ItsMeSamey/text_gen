@@ -7,15 +7,8 @@ const defaults = @import("defaults.zig");
 /// A base onject to store the frequency of occurrence a sequence
 /// if `Key` is u8, assumes a char markov mode
 pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
-  comptime {
-    std.debug.assert(Len > 1);
-
-    std.debug.assert(@typeInfo(Key).int.signedness == .unsigned);
-    std.debug.assert(@typeInfo(Key).int.bits <= std.math.maxInt(u8));
-
-    std.debug.assert(@typeInfo(Val).int.signedness == .unsigned);
-    std.debug.assert(@typeInfo(Val).int.bits <= std.math.maxInt(u8));
-  }
+  // Validate inputs
+  _ = MarkovModelStats.init(Len, Key, Val, defaults.Endian);
 
   // Done this way so we can easily sort the keys array without copying
   const kvp = struct { k: [Len]Key, v: Val };
@@ -49,6 +42,12 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
     /// Writes the data to `writer` does *NOT* deinitialize anything
     /// `MinKeyType` tells us what is the minimum possible int size needed for key values
     /// `MinKeyType` = `u8` must be used only for char model
+    ///
+    /// The model is stored into the file (writer) as follows
+    /// 1 * [ model stats ]; <- header (type = MarkovModelStats)
+    /// unknown * [ <- section(s)
+    ///   (Len-2) * MinKeyType <-
+    /// ];
     pub fn flush(self: *Self, writer: std.io.AnyWriter, comptime MinKeyType: type) !void {
       const list = self.map.keys();
       std.sort.pdq(kvp, list, {}, struct {
@@ -57,7 +56,7 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
         }
       }.function);
 
-      try MarkovModelStats.init(Len, MinKeyType, Val, Key == u8, defaults.Endian).flush(writer);
+      try MarkovModelStats.init(Len, MinKeyType, Val, defaults.Endian).flush(writer);
       try writer.writeInt(u64, list.len * @sizeOf(std.meta.Child(list.ptr)), defaults.Endian);
 
       var index: usize = 0;
@@ -72,7 +71,7 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
         }.partitionPointFn));
 
         var nextIndex = index;
-        while (nextIndex != list.len and meta.arrAsUint(list[nextIndex].k[0..Len-1]) == meta.arrAsUint(prefix)) nextIndex += 1 ;
+        while (nextIndex != list.len and meta.arrAsUint(list[nextIndex].k[0..Len-1]) == meta.arrAsUint(prefix)) nextIndex += 1;
         try writer.writeInt(MinKeyType, nextIndex, defaults.Endian);
 
         for (index..nextIndex) |i| {

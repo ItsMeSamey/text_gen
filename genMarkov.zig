@@ -8,3 +8,7 @@ pub fn init(modelPath: []const u8, allocator: ?std.mem.Allocator) Self {
   _ = data;
 }
 
+pub fn load() void {
+
+}
+

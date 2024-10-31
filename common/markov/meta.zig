@@ -15,6 +15,7 @@ pub fn asUint(comptime len: comptime_int, slice: anytype) Uint(len, @TypeOf(slic
   return @bitCast(nonSentinel[0..len].*);
 }
 
+// Convert array to a uint
 pub fn arrAsUint(arr: anytype) Uint(arr.len, @TypeOf(arr)) {
   return asUint(arr.len, arr);
 }
@@ -53,8 +54,7 @@ test SizedUint {
   try std.testing.expect(SizedUint(std.math.maxInt(u16) + 1) == u17);
 }
 
-test Uint {
-  const hello = "hello";
-  try std.testing.expect(asUint(5, hello) == @as(u40, @bitCast([5]u8{'h', 'e', 'l', 'l', 'o'})));
+test asUint {
+  try std.testing.expect(asUint(5, "hello") == @as(u40, @bitCast([5]u8{'h', 'e', 'l', 'l', 'o'})));
 }
 
