@@ -28,6 +28,7 @@ pub fn asUint(comptime len: comptime_int, slice: anytype) Uint(len, @TypeOf(slic
 test asUint {
   try std.testing.expect(asUint(5, "hello") == @as(u40, @bitCast([5]u8{'h', 'e', 'l', 'l', 'o'})));
 }
+
 // Convert array to a uint
 pub fn arrAsUint(arr: anytype) Uint(arr.len, @TypeOf(arr)) {
   return asUint(arr.len, arr);
@@ -57,17 +58,34 @@ pub fn opposite(comptime op: std.math.CompareOperator) std.math.CompareOperator 
   };
 }
 
-test SizedUint {
-  try std.testing.expect(SizedUint(0) == u0);
-  try std.testing.expect(SizedUint(1) == u1);
-  try std.testing.expect(SizedUint(2) == u2);
-  try std.testing.expect(SizedUint(3) == u2);
+pub const TableChain = packed struct {
+  /// offset offset to some TableKey of this chain
+  offset: u32,
+  /// total number of entries in this chain
+  entries: u32,
+};
 
-  try std.testing.expect(SizedUint(std.math.maxInt(u16)) == u16);
-  try std.testing.expect(SizedUint(std.math.maxInt(u16) + 1) == u17);
+pub fn TableKey(Key: type, Val: type) type {
+  _ = Val;
+  return packed struct {
+    /// Key (the last one) that should be next
+    key: Key,
+    /// offset to values in `vals` table
+    value: u32,
+    /// offset to the first entry of what would be the next value
+    next: u32,
+  };
 }
 
-test asUint {
-  try std.testing.expect(asUint(5, "hello") == @as(u40, @bitCast([5]u8{'h', 'e', 'l', 'l', 'o'})));
+pub fn TableVal(Key: type, Val: type) type {
+  return packed struct {
+    /// suboffset to the next entry that should be, actual offset to next = Keys.next + Vals.subnext
+    subnext: Key,
+    /// a kind probability that this value should be considered
+    /// NOTE: this is not the actual `probability`, it's actual probability + val of prev entry
+    /// eg: say we have 3 Vals for some key with with actual probability = {.3, .5, .2}, Vals = { .3, .8, 1} (the last value is always 1)
+    /// this is done to make random selection easy and less computationally expensive
+    val: Val,
+  };
 }
 
