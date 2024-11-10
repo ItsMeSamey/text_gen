@@ -58,12 +58,15 @@ pub fn opposite(comptime op: std.math.CompareOperator) std.math.CompareOperator 
   };
 }
 
-pub const TableChain = packed struct {
-  /// offset offset to some TableKey of this chain
-  offset: u32,
-  /// total number of entries in this chain
-  entries: u32,
-};
+pub fn TableChain(Key: type, Val: type) type {
+  _ = Key;
+  return packed struct {
+    /// offset offset to some TableKey of this chain
+    offset: u32,
+    /// Probability similar to TableVal.val
+    val: Val,
+  };
+}
 
 pub fn TableKey(Key: type, Val: type) type {
   _ = Val;

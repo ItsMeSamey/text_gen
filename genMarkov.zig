@@ -84,7 +84,7 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum, ConversionCo
     vals: []const TableVal,
 
     /// an array of saperate chain offsets inside of the `jt` and is again the result of `Base.flush`
-    carray: []meta.TableChain,
+    carray: []TableChain,
     /// index of the chain that is currently selected
     cindex: u32 = 0,
 
@@ -99,6 +99,7 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum, ConversionCo
     freeCarray: bool,
 
     const Self = @This();
+    const TableChain = meta.TableChain(Key, Val);
     const TableKey = meta.TableKey(Key, Val);
     const TableVal = meta.TableVal(Key, Val);
 
@@ -124,7 +125,7 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum, ConversionCo
 
     /// Generate a key, a key may or may not translate to a full word
     fn genKey(self: *Self) Key {
-      const offset = self.carray[self.cindex];
+      const offset = self.carray[self.cindex].offset;
       const key0 = read(self.keys, offset);
       const key1 = read(self.keys, offset+1);
       const vals = self.vals[key0.value..key1.value];
@@ -132,7 +133,7 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum, ConversionCo
       const context = struct {
         target: TableKey,
 
-        pub fn lt(c: @This(), v: TableKey) std.math.Order {
+        fn lt(c: @This(), v: TableKey) bool {
           var vCopy = v;
           comptime if (CpuEndianness != Endianness) std.mem.byteSwapAllFields(TableKey, &vCopy);
           return c.target.value <= vCopy.value;
@@ -142,14 +143,22 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum, ConversionCo
       const valIndex = std.sort.partitionPoint(TableKey, vals, context{ .target = self.random.float(Val) }, context.lt);
       const keyNext = read(vals, valIndex);
 
-      self.carray[self.cindex] = key0.next + keyNext.subnext;
+      self.carray[self.cindex].offset = key0.next + keyNext.subnext;
 
       return key0.key;
     }
 
     /// Refresh the cindex to random
     pub fn refresh(self: *Self) void {
-      self.cindex = self.random.intRangeLessThan(u32, 0, self.carray.len);
+      const context = struct {
+        target: TableChain,
+
+        fn lt(c: @This(), v: TableChain) bool {
+          return c.target.offset < v.offset;
+        }
+      };
+
+      self.cindex = std.sort.partitionPoint(TableChain, self.carray, context{ .target = self.random.float(Val) }, context.lt);
     }
 
     pub fn free(self: *Self) void {
