@@ -9,28 +9,36 @@ fn statsWithSameEndianness(data: []const u8) Stats {
   return stats;
 }
 
+pub fn swapEndianness(data: []u8) void {
+  _ = data;
+  @compileError("TODO: Implement");
+}
+
 /// Has no runtiume cost when endianness does not match as it mutates data to change the endianness in place
 /// Mutates the header too to reflect the change
-pub fn initMutable(data: []u8, allocator: std.mem.Allocator) GetMarkovGenFromRuntimeStats(statsWithSameEndianness(data)) {
+pub fn initMutable(data: []u8) !GetMarkovGenFromRuntimeStats(statsWithSameEndianness(data)) {
   const stats = Stats.ModelStats.fromBytes(data);
-  if (CpuEndianness == stats.endian) return initImmutableUncopyable(data, allocator);
+  if (CpuEndianness != stats.endian) swapEndianness(data);
 
   @compileError("TODO: Implement");
-  // Byte swap all fields
+  // return initImmutableUncopyable(data, allocator);
 }
 
 /// This may have runtime cost of interchanging endianness if a model with inappropriate endianness is loaded
-pub fn initImmutableCopyable(data: []const u8, allocator: std.mem.Allocator) GetMarkovGenFromRuntimeStats(statsWithSameEndianness(data)) {
+pub fn initImmutableCopyable(data: []const u8, allocator: std.mem.Allocator) !GetMarkovGenFromRuntimeStats(statsWithSameEndianness(data)) {
   const stats = Stats.ModelStats.fromBytes(data);
   if (CpuEndianness == stats.endian) return initImmutableUncopyable(data, allocator);
 
-  @compileError("TODO: Implement");
-  // var copy = allocator.alloc(u8, data.len);
+  // const copy = try allocator.alloc(u8, data.len);
   // @memcpy(copy, data);
-  // Byte swap all fields of copy
+  // swapEndianness(copy);
+  //
+  // return initMutable(copy, allocator);
 }
 
-pub fn initImmutableUncopyable(data: []const u8, allocator: std.mem.Allocator) GetMarkovGenFromRuntimeStats(Stats.ModelStats.fromBytes(data)) {
+
+pub fn initImmutableUncopyable(data: []const u8, allocator: std.mem.Allocator) !GetMarkovGenFromRuntimeStats(Stats.ModelStats.fromBytes(data)) {
+  _ = allocator;
   return .{};
 }
 
