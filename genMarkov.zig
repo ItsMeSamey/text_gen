@@ -10,16 +10,70 @@ fn statsWithSameEndianness(data: []const u8) Stats {
   return stats;
 }
 
-pub fn swapEndianness(data: []u8) void {
-  _ = data;
-  @compileError("TODO: Implement");
-}
+const swapper = struct {
+  fn readOne(comptime T: type, Endianness: Stats.EndianEnum, data: []const u8, offset: usize) T {
+    var retval: [1]T = data[offset][0..@sizeOf(T)];
+    comptime if (CpuEndianness != Endianness) std.mem.byteSwapAllFields(std.meta.Child(@TypeOf(data)), &retval);
+    return retval;
+  }
+
+  fn swapEndiannessOfBytes(comptime T: type, bytes: []u8, offset: usize) void {
+    swapEndianness(@as(*T, @ptrCast(bytes[offset..][0..@sizeOf(T)].ptr)));
+  }
+
+  fn swapEndianness(ptr: anytype) void {
+    const S = @typeInfo(@TypeOf(ptr)).pointer.child;
+    switch (@typeInfo(S)) {
+      // optional: Optional,
+      // @"union": Union,
+      // frame: Frame,
+      // @"anyframe": AnyFrame,
+      // vector: Vector,
+
+      .type, .void, .bool, .noreturn, .undefined, .null, .error_union, .error_set, .@"fn", .enum_literal => {},
+      .int, .comptime_float, .comptime_int => {
+        ptr.* = @byteSwap(ptr.*);
+      },
+      .float => |float_info| {
+        ptr.* = @bitCast(@byteSwap(@as(std.meta.Int(.unsigned, float_info.bits), @bitCast(ptr.*))));
+      },
+      .pointer => |ptr_info| {
+        switch (ptr_info.size) {
+          .Slice => {
+            for (ptr) |*item| swapEndianness(item);
+          },
+          else => @compileError("swapEndianness unexpected child to pointer type `" ++ @typeName(S) ++ "`"),
+        }
+      },
+      .array => {
+        for (ptr) |*item| swapEndianness(item);
+      },
+      .@"struct" => {
+        inline for (std.meta.fields(S)) |f| {
+          switch (@typeInfo(f.type)) {
+            .@"struct" => |struct_info| if (struct_info.backing_integer) |Int| {
+              @field(ptr, f.name) = @bitCast(@byteSwap(@as(Int, @bitCast(@field(ptr, f.name)))));
+            } else {
+              swapEndianness(&@field(ptr, f.name));
+            },
+          }
+        }
+      },
+      .@"enum" => {
+        ptr.* = @enumFromInt(@byteSwap(@intFromEnum(ptr.*)));
+      },
+
+      // @"opaque": Opaque,
+      else => @compileError("swapEndianness unexpected type `" ++ @typeName(S) ++ "` found"),
+    }
+  }
+};
 
 /// Has no runtiume cost when endianness does not match as it mutates data to change the endianness in place
 /// Mutates the header too to reflect the change
 pub fn initMutable(data: []u8) !GetMarkovGenFromRuntimeStats(statsWithSameEndianness(data)) {
-  const stats = Stats.ModelStats.fromBytes(data);
-  if (CpuEndianness != stats.endian) swapEndianness(data);
+  // const stats = Stats.ModelStats.fromBytes(data);
+  // if (CpuEndianness != stats.endian) swapEndianness(data);
 
   @compileError("TODO: Implement");
   // return initImmutableUncopyable(data, allocator);
@@ -39,8 +93,7 @@ pub fn initImmutableCopyable(data: []const u8, allocator: std.mem.Allocator) !Ge
 
 
 pub fn initImmutableUncopyable(data: []const u8, allocator: std.mem.Allocator) !GetMarkovGenFromRuntimeStats(Stats.ModelStats.fromBytes(data)) {
-  _ = allocator;
-  return .{};
+  return GetMarkovGenFromRuntimeStats(Stats.ModelStats.fromBytes(data)).init(data, null, true, allocator);
 }
 
 fn GetMarkovGenFromRuntimeStats(stats: Stats) type {
