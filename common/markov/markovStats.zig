@@ -12,9 +12,7 @@ pub const KeyEnum = enum(u2) {
   u64 = 3,
 
   pub fn fromType(comptime K: type) KeyEnum {
-    return std.meta.stringToEnum(KeyEnum, @typeName(K)) orelse {
-      @compileError("Type is not a valid KeyEnum Entry");
-    };
+    return @field(KeyEnum, @typeName(K));
   }
 
   pub fn Type(comptime K: KeyEnum) type {
@@ -26,30 +24,24 @@ pub const ValEnum = enum(u1) {
   f64 = 1,
 
   pub fn fromType(comptime V: type) ValEnum {
-    return std.meta.stringToEnum(ValEnum, @typeName(V)) orelse {
-      @compileError("Type is not a valid ValEnum Entry");
-    };
+    return @field(ValEnum, @typeName(V));
   }
 
   pub fn Type(comptime K: ValEnum) type {
     return std.meta.Float(32 * (1 << @intFromEnum(K)));
   }
 };
-/// Because standard's builtin has inferred type
+/// Because standard's builtin has inferred type, therefor cant be in a packed struct
 pub const EndianEnum = enum(u1) {
   little = 0,
   big = 1,
 
-  pub fn fromEndian(comptime E: std.builtin.Endian) KeyEnum {
-    return std.meta.stringToEnum(EndianEnum, @tagName(E)) orelse {
-      @compileError("Invalid Endianness");
-    };
+  pub fn fromEndian(comptime E: std.builtin.Endian) EndianEnum {
+    return @field(EndianEnum, @tagName(E));
   }
 
-  pub fn toEndian(comptime E: std.builtin.Endian) KeyEnum {
-    return std.meta.stringToEnum(EndianEnum, @tagName(E)) orelse {
-      @compileError("Invalid Endianness");
-    };
+  pub fn toEndian(comptime E: EndianEnum) std.builtin.Endian {
+    return @field(std.builtin.Endian, @tagName(E));
   }
 };
 
@@ -63,10 +55,7 @@ pub const ModelStats = packed struct {
   /// Is this file little or big endian (hope that this variable is not affected by endianness)
   endian: EndianEnum,
 
-  pub fn init(chainLen: u8, keyType: type, valType: type, endianness: std.builtin.Endian) ModelStats {
-    comptime {
-      std.debug.assert(chainLen >= 2);
-    }
+  pub fn init(chainLen: u8, comptime keyType: type, comptime valType: type, comptime endianness: std.builtin.Endian) ModelStats {
     return .{
       // We assume chain length to be >= 2
       .modelLen = @intCast(chainLen - 2),
@@ -85,7 +74,7 @@ pub const ModelStats = packed struct {
   }
 
   /// Copies the bytes (this is needed due to alignment, I think!)
-  pub fn fromBytes(data: []const u8) ModelStats {
+  pub fn fromBytes(data: []const u8) !ModelStats {
     if (data.len < @sizeOf(ModelStats)) return error.FileTooSmall;
     var stats: ModelStats = undefined;
     @memcpy(std.mem.asBytes(&stats), data[0..@sizeOf(ModelStats)]);
@@ -94,7 +83,7 @@ pub const ModelStats = packed struct {
 };
 
 test {
-  const stat = ModelStats.init(2, u8, u8, .char, @import("defaults.zig").Endian);
+  const stat = ModelStats.init(2, u8, f32, @import("defaults.zig").Endian);
   const statBytes = std.mem.asBytes(&stat);
   const back = try ModelStats.fromBytes(statBytes);
 

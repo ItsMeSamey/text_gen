@@ -24,11 +24,13 @@ const swapper = struct {
   fn swapEndianness(ptr: anytype) void {
     const S = @typeInfo(@TypeOf(ptr)).pointer.child;
     switch (@typeInfo(S)) {
+      // -- Unhandled types --
       // optional: Optional,
       // @"union": Union,
       // frame: Frame,
       // @"anyframe": AnyFrame,
       // vector: Vector,
+      // @"opaque": Opaque,
 
       .type, .void, .bool, .noreturn, .undefined, .null, .error_union, .error_set, .@"fn", .enum_literal => {},
       .int, .comptime_float, .comptime_int => {
@@ -62,8 +64,6 @@ const swapper = struct {
       .@"enum" => {
         ptr.* = @enumFromInt(@byteSwap(@intFromEnum(ptr.*)));
       },
-
-      // @"opaque": Opaque,
       else => @compileError("swapEndianness unexpected type `" ++ @typeName(S) ++ "` found"),
     }
   }
@@ -79,24 +79,25 @@ const Offsets = struct {
 fn getOffsetsFromData(data: []const u8) Offsets {
   var retval: Offsets = undefined;
 
-  const load = struct {
+  const loader = struct {
     d: @TypeOf(data),
     fn load(self: *@This()) Stats.Range {
       const r = Stats.Range{ .start = readOne(u64, self.d, self.d.len - @sizeOf(u64)), .end = self.d.len - @sizeOf(u64)};
       self.d = self.d[0..self.d.len - r.start - @sizeOf(u64)];
     }
   }{ .d = data };
+  const load = loader.load;
 
   const stats = Stats.ModelStats.fromBytes(data);
   if (stats.key == .u8) {
     retval.conversionTable = null;
   } else {
-    retval.conversionTable = load.load();
+    retval.conversionTable = load();
   }
 
-  retval.chainArray = load.load();
-  retval.vals = load.load();
-  retval.keys = load.load();
+  retval.chainArray = loader.load();
+  retval.vals = loader.load();
+  retval.keys = loader.load();
   return retval;
 }
 
@@ -251,5 +252,9 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum, ConversionCo
       if (self.freeCarray) { self.allocator.free(self.carray); }
     }
   };
+}
+
+test {
+  std.testing.refAllDeclsRecursive(@This());
 }
 
