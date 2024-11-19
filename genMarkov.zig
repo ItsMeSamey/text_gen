@@ -10,13 +10,13 @@ fn statsWithSameEndianness(data: []const u8) Stats {
   return stats;
 }
 
-const swapper = struct {
-  fn readOne(comptime T: type, Endianness: Stats.EndianEnum, data: []const u8, offset: usize) T {
-    var retval: [1]T = data[offset][0..@sizeOf(T)];
-    comptime if (CpuEndianness != Endianness) std.mem.byteSwapAllFields(std.meta.Child(@TypeOf(data)), &retval);
-    return retval;
-  }
+fn readOne(comptime T: type, Endianness: Stats.EndianEnum, data: []const u8, offset: usize) T {
+  var retval: [1]T = data[offset][0..@sizeOf(T)];
+  comptime if (CpuEndianness != Endianness) std.mem.byteSwapAllFields(std.meta.Child(@TypeOf(data)), &retval);
+  return retval;
+}
 
+const swapper = struct {
   fn swapEndiannessOfBytes(comptime T: type, bytes: []u8, offset: usize) void {
     swapEndianness(@as(*T, @ptrCast(bytes[offset..][0..@sizeOf(T)].ptr)));
   }
@@ -68,6 +68,37 @@ const swapper = struct {
     }
   }
 };
+
+const Offsets = struct {
+  keys: Stats.Range,
+  vals: Stats.Range,
+  chainArray: Stats.Range,
+  conversionTable: ?Stats.Range,
+};
+
+fn getOffsetsFromData(data: []const u8) Offsets {
+  var retval: Offsets = undefined;
+
+  const load = struct {
+    d: @TypeOf(data),
+    fn load(self: *@This()) Stats.Range {
+      const r = Stats.Range{ .start = readOne(u64, self.d, self.d.len - @sizeOf(u64)), .end = self.d.len - @sizeOf(u64)};
+      self.d = self.d[0..self.d.len - r.start - @sizeOf(u64)];
+    }
+  }{ .d = data };
+
+  const stats = Stats.ModelStats.fromBytes(data);
+  if (stats.key == .u8) {
+    retval.conversionTable = null;
+  } else {
+    retval.conversionTable = load.load();
+  }
+
+  retval.chainArray = load.load();
+  retval.vals = load.load();
+  retval.keys = load.load();
+  return retval;
+}
 
 /// Has no runtiume cost when endianness does not match as it mutates data to change the endianness in place
 /// Mutates the header too to reflect the change
@@ -159,13 +190,14 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum, ConversionCo
     /// init this struct
     /// NOTE: we try to automatically free `carray` if it is not contained in data
     fn init(data: []const u8, carray: []u8, freeCarray: bool, allocator: std.mem.Allocator) Self {
-      _ = data;
+      const offsets = getOffsetsFromData(data);
+
       return .{
-        .keys = {},
-        .vals = {},
+        .keys = @as(*TableKey, @ptrCast(data[offsets.keys.start..].ptr))[0..(offsets.keys.end - offsets.keys.start)/@sizeOf(TableKey)],
+        .vals = @as(*TableVal, @ptrCast(data[offsets.vals.start..].ptr))[0..(offsets.vals.end - offsets.vals.start)/@sizeOf(TableVal)],
         .carray = carray,
-        .convTable = {},
-        .random = {},
+        .convTable = @as(*TableChain, @ptrCast(data[offsets.chainArray.start..].ptr))[0..(offsets.chainArray.end - offsets.chainArray.start)/@sizeOf(TableChain)],
+        .random = @import("common/rng.zig").random(),
         .allocator = allocator,
         .freeCarray = freeCarray,
       };

@@ -1,5 +1,9 @@
 const std = @import("std");
 
+pub const Range = struct {
+  start: u64,
+  end: u64,
+};
 
 pub const KeyEnum = enum(u2) {
   u8 = 0,

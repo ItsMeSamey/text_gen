@@ -114,7 +114,7 @@ pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
 
       fn default() @This() {
         return .{
-          .random = @import("common/word/rng.zig").random(),
+          .random = @import("common/rng.zig").random(),
           .data = comptimeOptions.defaultData,
         };
       }
