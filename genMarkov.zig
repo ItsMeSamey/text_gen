@@ -54,13 +54,9 @@ fn getOffsetsFromData(data: []const u8) Offsets {
 
 /// Has no runtiume cost when endianness does not match as it mutates data to change the endianness in place
 /// Mutates the header too to reflect the change
-pub fn initMutable(data: []u8) !GenInterface.WordGenerator {
-  _ = data;
-  // const stats = Stats.ModelStats.fromBytes(data);
-  // if (CpuEndianness != stats.endian) swapEndianness(data);
-
-  @compileError("TODO: Implement");
-  // return initImmutableUncopyable(data, allocator);
+pub fn initMutable(data: []u8, allocator: std.mem.Allocator) !GenInterface.WordGenerator {
+  const Model = GetMarkovGenFromRuntimeStats(Stats.ModelStats.fromBytes(data));
+  return GenInterface.fromGenMarkov(Model.initMutable(data, allocator));
 }
 
 /// This may have runtime cost of interchanging endianness if a model with inappropriate endianness is loaded
@@ -68,16 +64,19 @@ pub fn initImmutableCopyable(data: []const u8, allocator: std.mem.Allocator) !Ge
   const stats = Stats.ModelStats.fromBytes(data);
   if (CpuEndianness == stats.endian) return initImmutableUncopyable(data, allocator);
 
-  // const copy = try allocator.alloc(u8, data.len);
-  // @memcpy(copy, data);
-  // swapEndianness(copy);
-  //
-  // return initMutable(copy, allocator);
+  const copy = try allocator.alloc(u8, data.len);
+  @memcpy(copy, data);
+
+  return initMutable(copy, allocator);
 }
 
-
 pub fn initImmutableUncopyable(data: []const u8, allocator: std.mem.Allocator) !GenInterface.WordGenerator {
-  return GetMarkovGenFromRuntimeStats(Stats.ModelStats.fromBytes(data)).init(data, null, true, allocator);
+  const offsets = getOffsetsFromData(data);
+  const Model = GetMarkovGenFromRuntimeStats(Stats.ModelStats.fromBytes(data));
+  const carray = allocator.alloc(u8, offsets.chainArray.end - offsets.chainArray.start);
+  @memcpy(carray, data[offsets.chainArray.start..offsets.chainArray.end]);
+
+  return GenInterface.fromGenMarkov(Model.init(data, carray, true, allocator));
 }
 
 fn GetMarkovGenFromRuntimeStats(stats: Stats) type {
@@ -136,9 +135,6 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum, ConversionCo
 
     // The random number generator
     random: std.Random,
-
-    /// If we have to free carray
-    freeCarray: bool,
 
     const Self = @This();
 
@@ -221,7 +217,7 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum, ConversionCo
       return self.table[input];
     }
 
-    fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+    fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
       allocator.free(self.table);
     }
   };
@@ -236,20 +232,44 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum, ConversionCo
 
     /// init this struct
     /// NOTE: we try to automatically free `carray` if it is not contained in data
-    fn init(data: []const u8, carray: []u8, freeCarray: bool, allocator: std.mem.Allocator) !Self {
+    fn init(data: []const u8, carray: []u8, allocator: std.mem.Allocator) !Self {
       const offsets = getOffsetsFromData(data);
 
+      return Self.initFragments(
+        data[offsets.keys.start..offsets.keys.end],
+        data[offsets.vals.start..offsets.vals.end],
+        carray,
+        allocator,
+      );
+    }
+
+    fn initMutable(data: []u8, allocator: std.mem.Allocator) !Self {
+      const offsets = getOffsetsFromData(data);
+
+      return Self.initFragments(
+        data[offsets.keys.start..offsets.keys.end],
+        data[offsets.vals.start..offsets.vals.end],
+        data[offsets.chainArray.start..offsets.chainArray.end],
+        false,
+        allocator,
+      );
+    }
+
+    fn initFragmentsMutable(keys: []u8, vals: []u8, carray: []u8, allocator: std.mem.Allocator) !Self {
+      return Self.initFragments(keys, vals, carray, allocator);
+    }
+
+    fn initFragments(keys: []const u8, vals: []const u8, carray: []u8, allocator: std.mem.Allocator) !Self {
       return .{
         .generator = .{
-          .keys = data[offsets.keys.start..offsets.keys.end],
-          .vals = data[offsets.vals.start..offsets.vals.end],
-          .carray = carray,
-          .keyCount = (offsets.keys.end - offsets.keys.start) / @sizeOf(TableKey),
-          .valCount = (offsets.vals.end - offsets.vals.start) / @sizeOf(TableVal),
+          .keys = keys.ptr,
+          .vals = vals.ptr,
+          .carray = carray.ptr,
+          .keyCount = keys.len / @sizeOf(TableKey),
+          .valCount = vals.len / @sizeOf(TableVal),
           .carrayCount = carray.len / @sizeOf(TableChain),
           .cindex = 0,
           .random = @import("common/rng.zig").getRandom(),
-          .freeCarray = freeCarray,
         },
         .converter = if (Key == u8) .{
           .buffer = undefined,
@@ -259,23 +279,20 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum, ConversionCo
       };
     }
 
-    fn gen(self: *Self) []const u8 {
+    pub fn gen(self: *Self) []const u8 {
       if (Key == u8) {
         while (true) { if (self.converter.convert(self.generator.gen())) |retval| return retval; }
       }
       return self.converter.convert(self.generator.gen());
     }
 
-    fn roll(self: *Self) void {
+    pub fn roll(self: *Self) void {
       self.generator.roll();
     }
 
-    fn deinit(self: *Self) void {
+    pub fn deinit(self: *Self) void {
       if (Key == u8) {
         self.converter.deinit(self.allocator);
-      }
-      if (self.generator.freeCarray) {
-        self.allocator.free(self.generator.carray);
       }
     }
   };

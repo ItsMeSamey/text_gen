@@ -36,10 +36,10 @@ pub const WordGenerator = struct {
 };
 
 pub fn fromGenWords(genWords: anytype) WordGenerator {
-  const generatorType = @TypeOf(genWords);
+  const generatorType = @typeInfo(@TypeOf(genWords)).pointer.child;
   const converter = GetConverter(generatorType, generatorType.gen, null, generatorType.free);
   return WordGenerator{
-    .ptr = genWords,
+    .ptr = @ptrCast(genWords),
     ._gen = converter.gen,
     ._roll = converter.roll,
     ._free = converter.free,
@@ -47,10 +47,10 @@ pub fn fromGenWords(genWords: anytype) WordGenerator {
 }
 
 pub fn fromGenMarkov(genMarkov: anytype) WordGenerator {
-  const generatorType = @TypeOf(genMarkov);
+  const generatorType = @typeInfo(@TypeOf(genMarkov)).pointer.child;
   const converter = GetConverter(generatorType, generatorType.gen, generatorType.roll, generatorType.free);
   return WordGenerator{
-    .ptr = genMarkov,
+    .ptr = @ptrCast(genMarkov),
     ._gen = converter.gen,
     ._roll = converter.roll,
     ._free = converter.free,
