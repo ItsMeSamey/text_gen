@@ -92,3 +92,51 @@ pub fn TableVal(Key: type, Val: type) type {
   };
 }
 
+/// An interface for swapping endianness of anything
+fn swapEndianness(ptr: anytype) void {
+  const S = @typeInfo(@TypeOf(ptr)).pointer.child;
+  switch (@typeInfo(S)) {
+    // -- Unhandled types --
+    // optional: Optional,
+    // @"union": Union,
+    // frame: Frame,
+    // @"anyframe": AnyFrame,
+    // vector: Vector,
+    // @"opaque": Opaque,
+
+    .type, .void, .bool, .noreturn, .undefined, .null, .error_union, .error_set, .@"fn", .enum_literal => {},
+    .int, .comptime_float, .comptime_int => {
+      ptr.* = @byteSwap(ptr.*);
+    },
+    .float => |float_info| {
+      ptr.* = @bitCast(@byteSwap(@as(std.meta.Int(.unsigned, float_info.bits), @bitCast(ptr.*))));
+    },
+    .pointer => |ptr_info| {
+      switch (ptr_info.size) {
+        .Slice => {
+          for (ptr) |*item| swapEndianness(item);
+        },
+        else => @compileError("swapEndianness unexpected child to pointer type `" ++ @typeName(S) ++ "`"),
+      }
+    },
+    .array => {
+      for (ptr) |*item| swapEndianness(item);
+    },
+    .@"struct" => {
+      inline for (std.meta.fields(S)) |f| {
+        switch (@typeInfo(f.type)) {
+          .@"struct" => |struct_info| if (struct_info.backing_integer) |Int| {
+            @field(ptr, f.name) = @bitCast(@byteSwap(@as(Int, @bitCast(@field(ptr, f.name)))));
+          } else {
+            swapEndianness(&@field(ptr, f.name));
+          },
+        }
+      }
+    },
+    .@"enum" => {
+      ptr.* = @enumFromInt(@byteSwap(@intFromEnum(ptr.*)));
+    },
+    else => @compileError("swapEndianness unexpected type `" ++ @typeName(S) ++ "` found"),
+  }
+}
+

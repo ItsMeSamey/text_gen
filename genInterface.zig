@@ -16,7 +16,7 @@ fn GetConverter(T: type, _gen: fn(*T) []const u8, _roll: ?fn(*T) void, _free: ?f
   };
 }
 
-const WordGenerator = struct {
+pub const WordGenerator = struct {
   ptr: *anyopaque,
   _gen: *fn (*anyopaque) []const u8,
   _roll: *fn (*anyopaque) void,
