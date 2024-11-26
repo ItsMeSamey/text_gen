@@ -93,7 +93,7 @@ pub fn TableVal(Key: type, Val: type) type {
 }
 
 /// An interface for swapping endianness of anything
-fn swapEndianness(ptr: anytype) void {
+pub fn swapEndianness(ptr: anytype) void {
   const S = @typeInfo(@TypeOf(ptr)).pointer.child;
   switch (@typeInfo(S)) {
     // -- Unhandled types --

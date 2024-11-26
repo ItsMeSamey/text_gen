@@ -105,7 +105,7 @@ pub const RngFns = struct {
 
 pub const CompositeRngFns = struct {
   // Randomly choose one on the random functions
-  pub fn randomRandomFn(random: std.Random) (fn(random: std.Random, prev: halfusize, max: halfusize) halfusize) {
+  pub fn randomRandomFn(random: std.Random) (*const fn(random: std.Random, prev: halfusize, max: halfusize) halfusize) {
     const functions = @typeInfo(RngFns).@"struct".decls;
     const len = functions.len;
 
