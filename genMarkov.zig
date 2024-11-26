@@ -169,6 +169,7 @@ fn getMarkovGenInterface(comptime init: InitType, data: []const u8, allocator: s
 fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
   const read = struct {
     fn read(comptime Output: type, data: [*]const u8, index: usize) Output {
+      // NOTE: This may cause problems as alignment may not be guaranteed
       const optr: *const Output = @ptrCast(@alignCast(data[@sizeOf(Output) * index..][0 .. @sizeOf(Output)]));
       var oval = optr.*;
       if (CpuEndianness != Endianness) std.mem.byteSwapAllFields(Output, &oval);
