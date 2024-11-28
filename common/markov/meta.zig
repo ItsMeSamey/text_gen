@@ -31,7 +31,8 @@ test asUint {
 
 // Convert array to a uint
 pub fn arrAsUint(arr: anytype) Uint(arr.len, @TypeOf(arr)) {
-  return asUint(arr.len, arr);
+  const nonSentinel = @as(*const [arr.len]std.meta.Elem(@TypeOf(arr)), &arr);
+  return @bitCast(nonSentinel.*);
 }
 
 /// Similar to std.math.compare but is more deneric

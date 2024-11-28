@@ -14,11 +14,12 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
   // Done this way so we can easily sort the keys array without copying
   const kvp = struct { k: [Len]Key, v: Val };
   const MarkovMap = std.ArrayHashMap(kvp, void, struct {
-    pub fn hash(_: @This(), k: kvp) u64 {
-      return std.hash_map.getAutoHashFn([Len]Key, @This())(k.k);
+    const keyHashFn = std.array_hash_map.getAutoHashFn([Len]Key, @This());
+    pub fn hash(self: @This(), k: kvp) u32 {
+      return keyHashFn(self, k.k);
     }
-    pub fn eql(_: @This(), a: kvp, b: kvp) bool {
-      return meta.asUint(Len, a.k) == meta.asUint(Len, b.k);
+    pub fn eql(_: @This(), a: kvp, b: kvp, _: usize) bool {
+      return meta.arrAsUint(a.k) == meta.arrAsUint(b.k);
     }
   }, @sizeOf([Len]Key) <= std.simd.suggestVectorLength(u8) orelse @sizeOf(usize));
 
@@ -50,37 +51,40 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
     ///   (Len-2) * MinKeyType <-
     /// ];
     pub fn write(self: *Self, writer: std.io.AnyWriter, comptime MinKeyType: type) !void {
-      const list = self.map.keys();
-      std.sort.pdq(kvp, list, {}, struct {
-        fn function(_: void, lhs: kvp, rhs: kvp) bool {
-          return meta.asUint(Len, &lhs.k) < meta.asUint(Len, &rhs.k);
-        }
-      }.function);
-
-      try MarkovModelStats.init(Len, MinKeyType, Val, defaults.Endian).flush(writer);
-      try writer.writeInt(u64, list.len * @sizeOf(std.meta.Child(list.ptr)), defaults.Endian);
-
-      var index: usize = 0;
-      while (index != list.len) {
-        const prefix = list[index].k[0..Len-1];
-        inline for (prefix) |item| try writer.writeInt(MinKeyType, item, defaults.Endian);
-
-        try writer.writeInt(Val, std.sort.partitionPoint(kvp, list, meta.arrAsUint(prefix), struct {
-          fn partitionPointFn(target: meta.Uint(Len-1, Val), val: kvp) bool {
-            return meta.asUint(Len-1, &val.k) < target;
-          }
-        }.partitionPointFn));
-
-        var nextIndex = index;
-        while (nextIndex != list.len and meta.arrAsUint(list[nextIndex].k[0..Len-1]) == meta.arrAsUint(prefix)) nextIndex += 1;
-        try writer.writeInt(MinKeyType, nextIndex, defaults.Endian);
-
-        for (index..nextIndex) |i| {
-          try writer.writeInt(MinKeyType, list[i].k[Len-1], defaults.Endian);
-          try writer.writeInt(Val, @bitCast(list[i].v), defaults.Endian);
-        }
-        index = nextIndex;
-      }
+      _ = self;
+      _ = MinKeyType;
+      _ = writer;
+      // const list = self.map.keys();
+      // std.sort.pdq(kvp, list, {}, struct {
+      //   fn function(_: void, lhs: kvp, rhs: kvp) bool {
+      //     return meta.asUint(Len, &lhs.k) < meta.asUint(Len, &rhs.k);
+      //   }
+      // }.function);
+      //
+      // try MarkovModelStats.init(Len, MinKeyType, Val, defaults.Endian).flush(writer);
+      // try writer.writeInt(u64, list.len * @sizeOf(kvp), defaults.Endian);
+      //
+      // var index: usize = 0;
+      // while (index != list.len) {
+      //   const prefix = list[index].k[0..Len-1];
+      //   inline for (prefix) |item| try writer.writeInt(MinKeyType, item, defaults.Endian);
+      //
+      //   try writer.writeInt(Val, std.sort.partitionPoint(kvp, list, meta.arrAsUint(prefix), struct {
+      //     fn partitionPointFn(target: meta.Uint(Len-1, Val), val: kvp) bool {
+      //       return meta.asUint(Len-1, &val.k) < target;
+      //     }
+      //   }.partitionPointFn));
+      //
+      //   var nextIndex = index;
+      //   while (nextIndex != list.len and meta.arrAsUint(list[nextIndex].k[0..Len-1]) == meta.arrAsUint(prefix)) nextIndex += 1;
+      //   try writer.writeInt(MinKeyType, nextIndex, defaults.Endian);
+      //
+      //   for (index..nextIndex) |i| {
+      //     try writer.writeInt(MinKeyType, list[i].k[Len-1], defaults.Endian);
+      //     try writer.writeInt(Val, @bitCast(list[i].v), defaults.Endian);
+      //   }
+      //   index = nextIndex;
+      // }
     }
 
     /// Free everything owned by this (Base) object
