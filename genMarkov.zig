@@ -183,7 +183,7 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
       const key0 = read(TableKey, self.keys, self.keyIndex);
       const key1 = read(TableKey, self.keys, self.keyIndex+1);
 
-      const target = self.random.intRangeAtMost(Val, 0, read(TableVal, self.vals, key1.value - 1).val);
+      const target = self.random.intRangeLessThan(Val, 0, read(TableVal, self.vals, key1.value - 1).val);
       var start: usize = key0.value;
       var end: usize = key1.value;
       var mid: usize = undefined;

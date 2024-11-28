@@ -28,7 +28,7 @@ pub fn getRandom() std.Random {
   }
 }
 
-pub const halfusize = std.meta.Int(.unsigned, @bitSizeOf(usize)/2);
+pub const RandomIntType = u32;
 
 /// These are the rng function you can use for wordGenerator
 /// All of these are biased (YES even linear)
@@ -36,23 +36,23 @@ pub const halfusize = std.meta.Int(.unsigned, @bitSizeOf(usize)/2);
 pub const RngFns = struct {
   /// NOTE: using addition can overflow. Therefor, undefined behaviour is used here.
   /// this however is possibly a bad idea as behaviour of while program may be undefined.
-  pub fn incrementalSum(random: std.Random, prev: halfusize, max: halfusize) halfusize {
-    const randomInt = random.int(halfusize);
+  pub fn incrementalSum(random: std.Random, prev: RandomIntType, max: RandomIntType) RandomIntType {
+    const randomInt = random.int(RandomIntType);
     const sum = init: {
       @setRuntimeSafety(false);
       break :init prev + randomInt;
     };
-    return std.Random.limitRangeBiased(halfusize, sum, max);
+    return std.Random.limitRangeBiased(RandomIntType, sum, max);
   }
 
   /// Uses xor instead of sum
-  pub fn incrementalXor(random: std.Random, prev: halfusize, max: halfusize) halfusize {
-    return std.Random.limitRangeBiased(halfusize, prev ^ random.int(halfusize), max);
+  pub fn incrementalXor(random: std.Random, prev: RandomIntType, max: RandomIntType) RandomIntType {
+    return std.Random.limitRangeBiased(RandomIntType, prev ^ random.int(RandomIntType), max);
   }
 
   /// Simplest random number
-  pub fn linear(random: std.Random, _: halfusize, max: halfusize) halfusize {
-    return random.uintLessThanBiased(halfusize, max);
+  pub fn linear(random: std.Random, _: RandomIntType, max: RandomIntType) RandomIntType {
+    return random.uintLessThanBiased(RandomIntType, max);
   }
 
   /// Fast square root approximation
@@ -69,34 +69,34 @@ pub const RngFns = struct {
   }
 
   /// limit the fsqrt result
-  fn limitedSqrt(val: u64, max: halfusize) halfusize {
+  fn limitedSqrt(val: u64, max: RandomIntType) RandomIntType {
     @setRuntimeSafety(false);
-    return std.Random.limitRangeBiased(halfusize, @truncate(fsqrt(val)), max);
+    return std.Random.limitRangeBiased(RandomIntType, @truncate(fsqrt(val)), max);
   }
 
   /// Sqrt based rng to generate smaller numbers more frequently
-  pub fn sqrt(random: std.Random, _: halfusize, max: halfusize) halfusize {
+  pub fn sqrt(random: std.Random, _: RandomIntType, max: RandomIntType) RandomIntType {
     @setRuntimeSafety(false);
     return limitedSqrt(random.uintLessThanBiased(u64, @as(u64, max) * @as(u64, max)), max);
   }
 
   /// Seem more natural
-  pub fn sqrtPrevMax_1(random: std.Random, prev: halfusize, max: halfusize) halfusize {
+  pub fn sqrtPrevMax_1(random: std.Random, prev: RandomIntType, max: RandomIntType) RandomIntType {
     @setRuntimeSafety(false);
     return limitedSqrt(random.uintLessThanBiased(u64, 1024 * @as(u64, (prev+1)) * @as(u64, max)), max);
   }
-  pub fn sqrtPrevMax_2(random: std.Random, prev: halfusize, max: halfusize) halfusize {
+  pub fn sqrtPrevMax_2(random: std.Random, prev: RandomIntType, max: RandomIntType) RandomIntType {
     @setRuntimeSafety(false);
     return limitedSqrt(random.uintLessThanBiased(u64, @as(u64, prev + max/2) * @as(u64, max)), max);
   }
 
   /// repeats words sometimes
-  pub fn sqrtPrev_1(random: std.Random, prev: halfusize, max: halfusize) halfusize {
+  pub fn sqrtPrev_1(random: std.Random, prev: RandomIntType, max: RandomIntType) RandomIntType {
     @setRuntimeSafety(false);
     return limitedSqrt(random.uintLessThanBiased(u64, @as(u64, prev + (max-prev)/2) * @as(u64, prev+1024) * 2) * 32, max);
   }
   /// Aloto x ?
-  pub fn sqrtPrev_2(random: std.Random, prev: halfusize, max: halfusize) halfusize {
+  pub fn sqrtPrev_2(random: std.Random, prev: RandomIntType, max: RandomIntType) RandomIntType {
     @setRuntimeSafety(false);
     return limitedSqrt(random.uintLessThanBiased(u64, @as(u64, prev + (max-prev)/2) * @as(u64, prev+1024) * 64) * 4, max);
   }
@@ -104,7 +104,7 @@ pub const RngFns = struct {
 
 pub const CompositeRngFns = struct {
   // Randomly choose one on the random functions
-  pub fn randomRandomFn(random: std.Random) (*const fn(random: std.Random, prev: halfusize, max: halfusize) halfusize) {
+  pub fn randomRandomFn(random: std.Random) (*const fn(random: std.Random, prev: RandomIntType, max: RandomIntType) RandomIntType) {
     const functions = @typeInfo(RngFns).@"struct".decls;
     const len = functions.len;
 
@@ -115,7 +115,7 @@ pub const CompositeRngFns = struct {
   }
 
   /// The default function, calls one of randomly selected functions every call
-  pub fn randomRandomFnEverytime(random: std.Random, prev: halfusize, max: halfusize) halfusize {
+  pub fn randomRandomFnEverytime(random: std.Random, prev: RandomIntType, max: RandomIntType) RandomIntType {
     return CompositeRngFns.randomRandomFn(random)(random, prev, max);
   }
 };

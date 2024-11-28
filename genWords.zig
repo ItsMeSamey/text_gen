@@ -4,14 +4,14 @@ const OptionalStruct = @import("common/word/meta.zig").OptionalStruct;
 
 const RNG = @import("common/rng.zig");
 
-pub const halfusize = std.meta.Int(.unsigned, @bitSizeOf(usize)/2);
+const RandomIntType = RNG.RandomIntType;
 
 /// The Argument to `GetWordGen` function
 pub const ComptimeOptions = struct {
   /// Random word generation function
   /// This is useful because the default data is ordered by frequency of usages in english
   /// the return value __MUST__ return value less than `max`
-  rngFn: fn(std.Random, halfusize, halfusize) halfusize = RNG.CompositeRngFns.randomRandomFnEverytime,
+  rngFn: fn(std.Random, RandomIntType, RandomIntType) RandomIntType = RNG.CompositeRngFns.randomRandomFnEverytime,
 
   /// If you never need to use the default wordGenerator, set this to empty string,
   /// this prevents inclusion of useless data
@@ -20,7 +20,7 @@ pub const ComptimeOptions = struct {
 
 pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
   return struct {
-    at: halfusize = 0,
+    at: RandomIntType = 0,
     /// index for last random word generated
     options: Options,
 
