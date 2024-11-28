@@ -5,7 +5,8 @@ const MarkovModelStats = @import("markovStats.zig").ModelStats;
 const defaults = @import("defaults.zig");
 
 /// A base onject to store the frequency of occurrence a sequence
-/// if `Key` is u8, assumes a char markov mode
+/// if `Key` is u8, assumes a char model
+/// The Val type here is used only during model creation
 pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
   // Validate inputs
   _ = MarkovModelStats.init(Len, Key, Val, defaults.Endian);
@@ -48,7 +49,7 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
     /// unknown * [ <- section(s)
     ///   (Len-2) * MinKeyType <-
     /// ];
-    pub fn flush(self: *Self, writer: std.io.AnyWriter, comptime MinKeyType: type) !void {
+    pub fn write(self: *Self, writer: std.io.AnyWriter, comptime MinKeyType: type) !void {
       const list = self.map.keys();
       std.sort.pdq(kvp, list, {}, struct {
         fn function(_: void, lhs: kvp, rhs: kvp) bool {
@@ -90,7 +91,7 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
 }
 
 test {
-  std.testing.refAllDecls(GenBase(2, defaults.CharKey, defaults.CharVal));
-  std.testing.refAllDecls(GenBase(2, defaults.WordKey, defaults.WordVal));
+  std.testing.refAllDecls(GenBase(2, defaults.CharKey, defaults.Val));
+  std.testing.refAllDecls(GenBase(2, defaults.WordKey, defaults.Val));
 }
 

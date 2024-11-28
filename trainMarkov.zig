@@ -1,9 +1,9 @@
 const std = @import("std");
 const GenBase = @import("common/markov/markovBase.zig").GenBase;
-
+const defaults = @import("common/markov/defaults.zig");
 
 fn CharMakov(Len: comptime_int) type {
-  const Base = GenBase(Len, u8, u32);
+  const Base = GenBase(Len, defaults.CharKey, defaults.Val);
 
   return struct {
     /// The base containing the modal
@@ -29,8 +29,9 @@ fn CharMakov(Len: comptime_int) type {
     }
 
     /// Writes the data to `writer` does *NOT* deinitialize anything
-    pub fn flush(self: *Self, writer: std.io.AnyWriter) void {
-      self.base.flush(writer, u8);
+    /// You will need to call deinit() explicitly
+    pub fn write(self: *Self, writer: std.io.AnyWriter) void {
+      self.base.write(writer, u8);
     }
 
     pub fn deinit(self: *Self) void {
@@ -48,7 +49,7 @@ fn WordMakov(Len: comptime_int) type {
     pub fn hash(_: @This(), a: []const u8) u64 { return strHash(a); }
   }, true);
   const CyclicList = @import("common/markov/cyclicList.zig").GenCyclicList(Len, []const u8);
-  const Base = GenBase(Len, u32, u32);
+  const Base = GenBase(Len, defaults.WordKey, defaults.Val );
 
   return struct {
     /// The base containing the modal
@@ -101,29 +102,28 @@ fn WordMakov(Len: comptime_int) type {
     }
 
     /// Writes the data to `writer` does *NOT* deinitialize anything
-    pub fn flush(self: *Self, writer: std.io.AnyWriter) void {
-      if (std.math.maxInt(u64) < self.table.count()) {
-        @panic("Table too large!");
-      }
+    /// You will need to call deinit() explicitly
+    pub fn write(self: *Self, writer: std.io.AnyWriter) void {
+      if (std.math.maxInt(u64) < self.table.count()) @panic("Table too large!");
 
       inline for (0..8) |intLen| {
         const intType = std.meta.Int(.unsigned, (intLen+1)*8);
         if (std.math.maxInt(intType) >= self.table.count()) {
-          self.base.flush(writer, intType);
+          self.base.write(writer, intType);
         }
       }
 
       var count: u64 = 0;
       for (self.table.keys()) |key| {
-        count += 1;
+        count += key.len + 1; // +1 for null terminator
         try writer.writeAll(key);
+        try writer.writeAll(&[_]u8{0});
       }
-      try writer.writeInt(u64, count, .little);
+      try writer.writeInt(u64, count, defaults.Endian);
     }
 
     pub fn deinit(self: *Self) void {
       self.base.deinit();
-
       for (self.table.keys()) |key| { self.table.allocator.free(key); }
       self.table.deinit();
     }

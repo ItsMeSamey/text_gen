@@ -20,15 +20,15 @@ pub const KeyEnum = enum(u2) {
   }
 };
 pub const ValEnum = enum(u1) {
-  f32 = 0,
-  f64 = 1,
+  u32 = 0,
+  u64 = 1,
 
   pub fn fromType(comptime V: type) ValEnum {
     return @field(ValEnum, @typeName(V));
   }
 
   pub fn Type(comptime K: ValEnum) type {
-    return std.meta.Float(32 * (1 << @intFromEnum(K)));
+    return std.meta.Int(.unsigned, 32 * (1 << @intFromEnum(K)));
   }
 };
 /// Because standard's builtin has inferred type, therefor cant be in a packed struct

@@ -5,8 +5,13 @@ const std = @import("std");
 /// You may want to call `GenPaddedCyclicList` with a larger multiplier of `Len`
 /// to get better performance (depending on your usage).
 pub fn GenCyclicList(Len: comptime_int, T: type) type {
-  // 16 here is arbitrarily chosen
-  return GenPaddedCyclicList(Len, Len * 16, T);
+  // -> this is arbitrarily chosen
+  comptime var len = 1;
+  while (len < Len) : (len *= 2) {}
+  len *= 8;
+  // <-
+
+  return GenPaddedCyclicList(Len, len, T);
 }
 
 /// Make a cyclic list with a list of given type T
