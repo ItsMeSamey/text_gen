@@ -1,4 +1,3 @@
-test { std.testing.refAllDeclsRecursive(@This()); }
 const std = @import("std");
 
 fn getPrng() std.Random.DefaultPrng {
@@ -120,4 +119,8 @@ pub const CompositeRngFns = struct {
     return CompositeRngFns.randomRandomFn(random)(random, prev, max);
   }
 };
+
+test {
+  std.testing.refAllDeclsRecursive(@This());
+}
 

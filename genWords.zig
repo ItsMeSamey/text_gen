@@ -11,13 +11,11 @@ pub const ComptimeOptions = struct {
   /// Random word generation function
   /// This is useful because the default data is ordered by frequency of usages in english
   /// the return value __MUST__ return value less than `max`
-  rngFn: RNG.CompositeRngFns.randomRandomFnEverytime,
+  rngFn: fn(std.Random, halfusize, halfusize) halfusize = RNG.CompositeRngFns.randomRandomFnEverytime,
 
   /// If you never need to use the default wordGenerator, set this to empty string,
   /// this prevents inclusion of useless data
   defaultData: []const u8 = @embedFile("./data/words.txt"),
-
-  deallocableData: bool = false,
 };
 
 pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
@@ -25,8 +23,6 @@ pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
     at: halfusize = 0,
     /// index for last random word generated
     options: Options,
-
-    allocator: if (comptimeOptions.deallocableData) std.mem.Allocator else void,
 
     const Self = @This();
 
@@ -50,7 +46,7 @@ pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
 
     /// Initialize with given options.
     /// If the all options are null (i.e. `.{}`), it's better (faster) to use `default()` instead
-    pub fn init(_: std.mem.Allocator, options: OptionalOptions) Self {
+    pub fn init(options: OptionalOptions) Self {
       if (comptimeOptions.defaultData.len == 0 and options.data == null) {
         const s = @src();
         @panic(
@@ -91,15 +87,24 @@ pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
       return self.options.data[start..end];
     }
 
-    pub fn free(self: *Self) void {
-      if (comptimeOptions.deallocableData) {
-        self.allocator.free(self.options.data);
-      }
+    const GenInterface = @import("genInterface.zig");
+    pub fn any(genWords: anytype) GenInterface.WordGenerator {
+      const generatorType = @typeInfo(@TypeOf(genWords)).pointer.child;
+      const converter = GenInterface.GetConverter(generatorType, generatorType.gen, null, null);
+      return .{
+        .ptr = @ptrCast(genWords),
+        ._gen = converter.gen,
+        ._roll = converter.roll,
+        ._free = converter.free,
+      };
     }
   };
 }
 
 test GetWordGen {
+  std.testing.refAllDeclsRecursive(GetWordGen(.{}));
+  std.testing.refAllDeclsRecursive(ComptimeOptions);
+  
   var generator = GetWordGen(.{}).init(.{});
 
   std.debug.print("TEST (GenWordGen):\n\tWORDS: ", .{});
