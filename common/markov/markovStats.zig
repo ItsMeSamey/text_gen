@@ -83,7 +83,7 @@ pub const ModelStats = packed struct {
 };
 
 test {
-  const stat = ModelStats.init(2, u8, f32, @import("defaults.zig").Endian);
+  const stat = ModelStats.init(2, u8, u32, @import("defaults.zig").Endian);
   const statBytes = std.mem.asBytes(&stat);
   const back = try ModelStats.fromBytes(statBytes);
 

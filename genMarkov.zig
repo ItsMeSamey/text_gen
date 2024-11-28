@@ -21,7 +21,6 @@ fn readOne(comptime T: type, Endianness: Stats.EndianEnum, data: []const u8, off
 const Offsets = struct {
   keys: Stats.Range,
   vals: Stats.Range,
-  chainArray: Stats.Range,
   conversionTable: ?Stats.Range,
 };
 
@@ -48,16 +47,9 @@ fn getOffsetsFromData(stats: Stats.ModelStats, data: []const u8) !Offsets {
     retval.conversionTable = loader.load();
   }
 
-  retval.chainArray = loader.load();
   retval.vals = loader.load();
   retval.keys = loader.load();
   return retval;
-}
-
-fn swapEndianness(keys: []u8, vals: []u8, carray: []u8) void {
-  _ = keys;
-  _ = vals;
-  _ = carray;
 }
 
 /// Has no runtiume cost when endianness does not match as it mutates data to change the endianness in place
@@ -90,7 +82,6 @@ fn getMarkovGenInterface(comptime init: InitType, data: []const u8, allocator: s
 
   const keys = data[offsets.keys.start..offsets.keys.end];
   const vals = data[offsets.vals.start..offsets.vals.end];
-  const carray = data[offsets.chainArray.start..offsets.chainArray.end];
 
   const convTable = if (offsets.conversionTable) |convTable| data[convTable.start..convTable.end] else null;
 
@@ -100,64 +91,52 @@ fn getMarkovGenInterface(comptime init: InitType, data: []const u8, allocator: s
       // K now comptime
       const Key: type = Stats.KeyEnum.Type(K);
       switch (stats.val) {
-        inline .f32, .f64 => |V| {
+        inline .u32, .u64 => |V| {
           // V now comptime
           const Val: type = Stats.ValEnum.Type(V);
           switch (stats.endian) {
             inline .little, .big => |Endianness| {
+              const swapEndianness = struct {
+                const TableKey = meta.TableKey(Key, Val);
+                const TableVal = meta.TableVal(Key, Val);
+                fn swapEndianness(keySlice: []u8, valSlice: []u8) void {
+                  meta.swapEndianness(@as([*]TableKey, @alignCast(@ptrCast(keySlice.ptr)))[0..keySlice.len/@sizeOf(Key)]);
+                  meta.swapEndianness(@as([*]TableVal, @alignCast(@ptrCast(valSlice.ptr)))[0..valSlice.len/@sizeOf(Val)]);
+                }
+              }.swapEndianness;
               // Endianness now comptime
 
               // All of the switch cases here are (or atleast are supposed to be) comptime
-              const Model = GetMarkovGen(Key, Val, if (Endianness == CpuEndianness) CpuEndianness else switch (init) {
-                .mutable, .immutable_copyable => CpuEndianness,
-                .immutable_uncopyable => Endianness,
-              });
-
-              const freeableSliceSize = switch (init) {
-                .mutable => @sizeOf(Model),
-                .immutable_copyable => if (Endianness == CpuEndianness) @sizeOf(Model) + carray.len else @sizeOf(Model) + keys.len + vals.len + carray.len,
-                .immutable_uncopyable => @sizeOf(Model) + carray.len,
-              };
+              const Model = GetMarkovGen(Key, Val, if (Endianness != CpuEndianness and init == .immutable_uncopyable) Endianness else CpuEndianness);
+              const freeableSliceSize = @sizeOf(Model) + (if (Endianness != CpuEndianness and init == .immutable_copyable) keys.len + vals.len else 0);
               const freeableSlice = try allocator.alloc(u8, freeableSliceSize);
 
               var model: *Model = @alignCast(@ptrCast(freeableSlice[0..@sizeOf(Model)].ptr));
               if (Endianness == CpuEndianness) {
-                switch (init) {
-                  .mutable => {
-                    try model.initFragments(keys, vals, @constCast(carray), convTable, allocator, freeableSlice);
-                  },
-                  .immutable_copyable, .immutable_uncopyable => {
-                    @memcpy(freeableSlice[@sizeOf(Model) ..], carray);
-                    try model.initFragments(keys, vals, freeableSlice[@sizeOf(Model) ..], convTable, allocator, freeableSlice);
-                  },
-                }
+                try model.initFragments(keys, vals, convTable, allocator, freeableSlice);
               } else {
                 switch (init) {
                   .mutable => {
                     const mutableKeys = @constCast(keys);
                     const mutableVals = @constCast(vals);
-                    const mutableCarray = @constCast(carray);
-                    swapEndianness(mutableKeys, mutableVals, mutableCarray);
-                    try model.initFragments(mutableKeys, mutableVals, mutableCarray, convTable, allocator, freeableSlice);
+                    swapEndianness(mutableKeys, mutableVals);
+                    try model.initFragments(mutableKeys, mutableVals, convTable, allocator, freeableSlice);
                   },
                   .immutable_copyable => {
                     const mutableKeys = freeableSlice[@sizeOf(Model)..][0..keys.len];
                     const mutableVals = mutableKeys.ptr[keys.len..][0..vals.len];
-                    const mutableCarray = mutableVals.ptr[vals.len..][0..carray.len];
                     @memcpy(mutableKeys, keys);
                     @memcpy(mutableVals, vals);
-                    @memcpy(mutableCarray, carray);
-                    swapEndianness(mutableKeys, mutableVals, mutableCarray);
-                    try model.initFragments(mutableKeys, mutableVals, mutableCarray, convTable, allocator, freeableSlice);
+                    swapEndianness(mutableKeys, mutableVals);
+                    try model.initFragments(mutableKeys, mutableVals, convTable, allocator, freeableSlice);
                   },
                   .immutable_uncopyable => {
-                    @memcpy(freeableSlice[@sizeOf(Model) ..], carray);
-                    try model.initFragments(keys, vals, freeableSlice[@sizeOf(Model) ..], convTable, allocator, freeableSlice);
+                    try model.initFragments(keys, vals, convTable, allocator, freeableSlice);
                   },
                 }
               }
 
-              return GenInterface.fromGenMarkov(model);
+              return model.any();
             } 
           }
         }
@@ -179,7 +158,6 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
 
   const TableKey = meta.TableKey(Key, Val);
   const TableVal = meta.TableVal(Key, Val);
-  const TableChain = meta.TableChain(Key, Val);
 
   // key generator
   const Generator = struct {
@@ -187,15 +165,13 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
     keys: [*]const u8,
     /// table of values to the keys
     vals: [*]const u8,
-    /// an array of saperate chain offsets inside of the `jt` and is again the result of `Base.flush`
-    carray: [*]u8,
 
+    // Does not include the last key (an empty last key to make logic of gen simpler)
     keyCount: u32,
     valCount: u32,
 
-    carrayCount: u32,
-    /// index of the chain that is currently selected
-    cindex: u32,
+    /// index in the keys table
+    keyIndex: u32,
 
     // The random number generator
     random: std.Random,
@@ -203,22 +179,20 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
     const Self = @This();
 
     /// Generate a key, a key may or may not translate to a full word
-    fn gen(self: *const Self) Key {
-      const offsetPtr: *TableChain = @ptrCast(@alignCast(self.carray[@sizeOf(TableChain) * self.cindex..]));
-      const offset = offsetPtr.offset;
-      const key0 = read(TableKey, self.keys, offset);
-      const key1 = read(TableKey, self.keys, offset+1);
+    fn gen(self: *Self) Key {
+      const key0 = read(TableKey, self.keys, self.keyIndex);
+      const key1 = read(TableKey, self.keys, self.keyIndex+1);
 
-      const target = self.random.float(Val);
+      const target = self.random.intRangeAtMost(Val, 0, read(TableVal, self.vals, key1.value - 1).val);
       var start: usize = key0.value;
       var end: usize = key1.value;
       var mid: usize = undefined;
 
       while (start < end) {
         mid = (end - start) / 2;
-        const midVal = read(TableVal, self.vals, mid);
+        const midVal = read(TableVal, self.vals, mid).val;
 
-        if (target < midVal.val) {
+        if (target < midVal) {
           end = mid;
         } else {
           start = mid + 1;
@@ -226,30 +200,14 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
       }
 
       const val = read(TableVal, self.vals, mid);
-      const nextOffset = key0.next + val.subnext;
-      offsetPtr.offset = @intCast(nextOffset);
-      // @memcpy(self.carray[@sizeOf(TableChain) * self.cindex..][0..@sizeOf(TableChain)], std.mem.asBytes(&nextOffset));
+      self.keyIndex = @intCast(key0.next + val.subnext);
 
       return key0.key;
     }
 
     /// Refresh the cindex to random
     pub fn roll(self: *Self) void {
-      var start: u32 = 0;
-      var end: u32 = self.carrayCount;
-      var mid: u32 = undefined;
-
-      while (start < end) {
-        mid = (end - start) / 2;
-        const midVal = read(TableChain, self.carray, mid);
-        if (midVal.offset < self.cindex) {
-          start = mid + 1;
-        } else {
-          end = mid;
-        }
-      }
-
-      self.cindex = mid;
+      self.keyIndex = self.random.intRangeLessThan(u32, 0, self.keyCount);
     }
   };
 
@@ -301,22 +259,20 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
   return struct {
     generator: Generator,
     converter: Converter,
-    /// Allocator for convTable and possibly carray
+    /// Allocator for freeableSlice
     allocator: std.mem.Allocator,
     freeableSlice: []const u8,
     
     const Self = @This();
 
-    fn initFragments(self: *Self, keys: []const u8, vals: []const u8, carray: []u8, convTable: ?[]const u8, allocator: std.mem.Allocator, freeableSlice: []const u8) !void {
+    fn initFragments(self: *Self, keys: []const u8, vals: []const u8, convTable: ?[]const u8, allocator: std.mem.Allocator, freeableSlice: []const u8) !void {
       self.* = .{
         .generator = .{
           .keys = keys.ptr,
           .vals = vals.ptr,
-          .carray = carray.ptr,
           .keyCount = @intCast(keys.len / @sizeOf(TableKey)),
           .valCount = @intCast(vals.len / @sizeOf(TableVal)),
-          .carrayCount = @intCast(carray.len / @sizeOf(TableChain)),
-          .cindex = 0,
+          .keyIndex = 0,
           .random = @import("common/rng.zig").getRandom(),
         },
         .converter = if (Key == u8) .{
@@ -344,6 +300,16 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
         self.converter.deinit(self.allocator);
       }
       self.allocator.free(self.freeableSlice);
+    }
+
+    pub fn any(self: *Self) GenInterface.WordGenerator {
+      const converter = GenInterface.GetConverter(Self, Self.gen, Self.roll, Self.free);
+      return .{
+        .ptr = @ptrCast(self),
+        ._gen = converter.gen,
+        ._roll = converter.roll,
+        ._free = converter.free,
+      };
     }
   };
 }

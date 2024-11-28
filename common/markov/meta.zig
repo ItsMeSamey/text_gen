@@ -58,16 +58,6 @@ pub fn opposite(comptime op: std.math.CompareOperator) std.math.CompareOperator 
   };
 }
 
-pub fn TableChain(Key: type, Val: type) type {
-  _ = Key;
-  return packed struct {
-    /// offset offset to some TableKey of this chain
-    offset: u32,
-    /// Probability similar to TableVal.val
-    val: Val,
-  };
-}
-
 pub fn TableKey(Key: type, Val: type) type {
   _ = Val;
   return packed struct {
@@ -94,7 +84,19 @@ pub fn TableVal(Key: type, Val: type) type {
 
 /// An interface for swapping endianness of anything
 pub fn swapEndianness(ptr: anytype) void {
-  const S = @typeInfo(@TypeOf(ptr)).pointer.child;
+  const PtrInfo = @typeInfo(@TypeOf(ptr));
+  if (PtrInfo != .pointer) @compileError("swapEndianness expected pointer type, found `" ++ @typeName(@TypeOf(ptr)) ++ "`");
+
+  switch (PtrInfo.pointer.size) {
+    .One => {},
+    .Slice => {
+      for (ptr) |*item| swapEndianness(item);
+      return;
+    },
+    else => @compileError("swapEndianness unexpected child to pointer type `" ++ @typeName(@TypeOf(ptr)) ++ "`"),
+  }
+
+  const S = PtrInfo.pointer.child;
   switch (@typeInfo(S)) {
     // -- Unhandled types --
     // optional: Optional,
@@ -113,9 +115,7 @@ pub fn swapEndianness(ptr: anytype) void {
     },
     .pointer => |ptr_info| {
       switch (ptr_info.size) {
-        .Slice => {
-          for (ptr) |*item| swapEndianness(item);
-        },
+        .One, .Slice => { return swapEndianness(*ptr); },
         else => @compileError("swapEndianness unexpected child to pointer type `" ++ @typeName(S) ++ "`"),
       }
     },
@@ -130,6 +130,7 @@ pub fn swapEndianness(ptr: anytype) void {
           } else {
             swapEndianness(&@field(ptr, f.name));
           },
+          else => swapEndianness(&@field(ptr, f.name)),
         }
       }
     },

@@ -1,6 +1,6 @@
 const std = @import("std");
 
-fn GetConverter(T: type, _gen: fn(*T) []const u8, _roll: ?fn(*T) void, _free: ?fn(*T) void) type {
+pub fn GetConverter(T: type, _gen: fn(*T) []const u8, _roll: ?fn(*T) void, _free: ?fn(*T) void) type {
   return struct {
     pub fn gen(ptr: *anyopaque) []const u8 {
       return _gen(@ptrCast(@alignCast(ptr)));
@@ -34,15 +34,4 @@ pub const WordGenerator = struct {
     self._free(self.ptr);
   }
 };
-
-pub fn fromGenMarkov(genMarkov: anytype) WordGenerator {
-  const generatorType = @typeInfo(@TypeOf(genMarkov)).pointer.child;
-  const converter = GetConverter(generatorType, generatorType.gen, generatorType.roll, generatorType.free);
-  return WordGenerator{
-    .ptr = @ptrCast(genMarkov),
-    ._gen = converter.gen,
-    ._roll = converter.roll,
-    ._free = converter.free,
-  };
-}
 
