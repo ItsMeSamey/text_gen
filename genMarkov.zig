@@ -47,8 +47,8 @@ fn getOffsetsFromData(stats: Stats.ModelStats, data: []const u8) !Offsets {
     retval.conversionTable = loader.load();
   }
 
-  retval.vals = loader.load();
   retval.keys = loader.load();
+  retval.vals = loader.load();
   return retval;
 }
 
@@ -166,14 +166,15 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
     /// table of values to the keys
     vals: [*]const u8,
 
-    // Does not include the last key (an empty last key to make logic of gen simpler)
+    /// Does not include the last key (an empty last key to make logic of gen simpler)
     keyCount: u32,
+    /// The number of values
     valCount: u32,
 
     /// index in the keys table
     keyIndex: u32,
 
-    // The random number generator
+    /// The random number generator
     random: std.Random,
 
     const Self = @This();

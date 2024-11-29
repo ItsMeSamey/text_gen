@@ -39,8 +39,8 @@ fn CharMakov(Len: comptime_int) type {
       }
     }
 
-    /// Writes the data to `writer` does *NOT* deinitialize anything
-    /// You will need to call deinit() explicitly
+    /// Writes the data to `writer` deinitialize this object
+    /// You will *NOT* need to call deinit() explicitly
     pub fn write(self: *Self, writer: std.io.AnyWriter) !void {
       return self.base.write(writer, u8);
     }
@@ -115,13 +115,13 @@ fn WordMakov(Len: comptime_int) type {
       self.cyclicList.push(result.value_ptr.*);
     }
 
-    /// Writes the data to `writer` does *NOT* deinitialize anything
-    /// You will need to call deinit() explicitly
+    /// Writes the data to `writer` deinitialize this object
+    /// You will *NOT* need to call deinit() explicitly
     pub fn write(self: *Self, writer: std.io.AnyWriter) !void {
       if (std.math.maxInt(u64) < self.table.count()) @panic("Table too large!");
 
-      inline for (0..8) |intLen| {
-        const intType = std.meta.Int(.unsigned, (intLen+1)*8);
+      inline for (0..4) |intLen| {
+        const intType = std.meta.Int(.unsigned, 8 * (1 << intLen));
         if (std.math.maxInt(intType) >= self.table.count()) {
           try self.base.write(writer, intType);
         }

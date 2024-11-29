@@ -14,7 +14,7 @@ test SizedUint {
   try std.testing.expect(SizedUint(std.math.maxInt(u16) + 1) == u17);
 }
 
-pub fn Uint(comptime len: comptime_int, sliceType: type) type {
+pub fn Uint(len: comptime_int, sliceType: type) type {
   const childSize = @sizeOf(std.meta.Elem(sliceType)) * 8;
   return std.meta.Int(.unsigned, childSize * len);
 }
@@ -31,7 +31,7 @@ test asUint {
 
 // Convert array to a uint
 pub fn arrAsUint(arr: anytype) Uint(arr.len, @TypeOf(arr)) {
-  const nonSentinel = @as(*const [arr.len]std.meta.Elem(@TypeOf(arr)), &arr);
+  const nonSentinel = @as(*const [arr.len]std.meta.Elem(@TypeOf(arr)), if (@typeInfo(@TypeOf(arr)) == .pointer) arr else &arr);
   return @bitCast(nonSentinel.*);
 }
 
