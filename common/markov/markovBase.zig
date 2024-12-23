@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const meta = @import("meta.zig");
 
 const MarkovModelStats = @import("markovStats.zig").ModelStats;
@@ -37,7 +38,7 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
 
     /// Increment the value for encountered key
     pub fn increment(self: *Self, key: [Len]Key) !void {
-      const result = try self.map.getOrPut(.{ .k = key, .v = 0 });
+      const result = try self.map.getOrPut(.{ .k = key, .v = 1 });
       if (result.found_existing) result.key_ptr.v += 1;
     }
 
@@ -45,104 +46,131 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
     /// `MinKeyType` tells us what is the minimum possible int size needed for key values
     /// `MinKeyType` = `u8` must be used only for char model
     pub fn write(self: *Self, writer: std.io.AnyWriter, comptime MinKeyType: type) !void {
+      try MarkovModelStats.init(Len, MinKeyType, Val, defaults.Endian).flush(writer);
+
       const TableKey = meta.TableKey(MinKeyType, Val);
       const TableVal = meta.TableVal(MinKeyType, Val);
 
       const fullList = self.map.keys();
-      defer self.map.deinit();
+      // defer self.map.deinit();
 
       std.sort.pdq(kvp, fullList, {}, struct {
-        fn function(_: void, lhs: kvp, rhs: kvp) bool {
-          return meta.asUint(Len, &lhs.k) < meta.asUint(Len, &rhs.k);
+        fn lessThanFn(_: void, lhs: kvp, rhs: kvp) bool {
+          return std.mem.order(Key, lhs.k[0..Len-1], rhs.k[0..Len-1]) == .lt;
         }
-      }.function);
+      }.lessThanFn);
 
       // Make a list if all the keys
-      var list = std.ArrayList(struct { k: [Len-1]Key, v: Val, n: u32 = undefined }).init(self.map.allocator);
+      var list = std.ArrayList(struct { key: [Len-1]Key, from: u32, next: u32 = undefined }).init(self.map.allocator);
       defer list.deinit();
 
       try list.append(.{
-        .k = fullList[0].k[0..Len-1].*,
-        .v = fullList[0].v,
+        .key = fullList[0].k[0..Len-1].*,
+        .from = 0,
       });
-      for (fullList) |entry| {
-        if (meta.arrAsUint(list.getLast().k) == meta.arrAsUint(entry.k[0..Len-1])) continue;
+      for (fullList, 0..) |entry, from| {
+        if (meta.arrAsUint(list.getLast().key) == meta.arrAsUint(entry.k[0..Len-1])) continue;
         try list.append(.{
-          .k = entry.k[0..Len-1].*,
-          .v = entry.v,
+          .key = entry.k[0..Len-1].*,
+          .from = @intCast(from),
         });
       }
 
-      try MarkovModelStats.init(Len, MinKeyType, Val, defaults.Endian).flush(writer);
-      try writer.writeInt(u64, list.items.len * @sizeOf(kvp), defaults.Endian);
+      // std.debug.print(">>> Keys\n", .{});
+      // for (list.items) |entry| std.debug.print("{any}\n", .{entry});
+      //
+      // std.debug.print(">>> Values\n", .{});
+      // for (fullList) |entry| std.debug.print("{any}\n", .{entry});
 
-      var nextMap = std.AutoHashMap(std.meta.Int(.unsigned, (Len-2) * 8 * @sizeOf(Val)), u32).init(self.map.allocator);
-      defer nextMap.deinit();
+      std.debug.print("Keys Length: {d}\n", .{list.items.len + 1});
+      std.debug.print("Values Length: {d}\n", .{fullList.len});
 
       // Write keys
-      for (list.items, 0..) |entry, index| {
-        const postfix = meta.arrAsUint(entry.k[1..][0..Len-2]);
+      for (list.items) |*entry| {
 
         var mid: u32 = undefined;
 
         // Get the offset of the next entry in mid
-        if (nextMap.get(postfix)) |val| {
-          mid = val;
+        if (Len == 2) {
+          mid = 0;
         } else {
           var start: u32 = 0;
           var end: u32 = @intCast(list.items.len);
           while (start < end) {
             mid = start + (end - start) / 2;
-            if (meta.arrAsUint(list.items[mid].k[1..][0..Len-2]) < postfix) {
+            if (std.mem.order(Key, entry.key[1..], list.items[mid].key[0..Len-2]) == .gt) {
               start = mid + 1;
             } else {
               end = mid;
             }
           }
 
-          try nextMap.put(postfix, mid);
+          // Partition point uses start/low instead of mid
+          mid = start;
+
+          if (builtin.mode == .Debug and mid < list.items.len and !std.mem.eql(Key, entry.key[1..], list.items[mid].key[0..Len-2])) {
+            std.debug.print("Partition point: {d}\n", .{mid});
+            std.debug.print("entry: {}, next_entry: {}", .{ entry.*, list.items[mid] });
+            unreachable;
+          }
         }
 
-        list.items[index].n = mid;
+        entry.next = mid;
         try writer.writeStructEndian(TableKey{
-          .key = @intCast(entry.k[0]),
-          .value = @intCast(index),
+          .key = @intCast(entry.key[entry.key.len-1]),
+          .value = @intCast(entry.from),
           .next = mid,
         }, defaults.Endian);
       }
 
       // The last (extra) key to make computation easier, see genMarkov.zig's GetMarkovGen.Generator.gen
       try writer.writeStructEndian(TableKey{
-        .key = std.math.maxInt(MinKeyType),
-        .value = @intCast(list.items.len),
+        .key = std.math.maxInt(MinKeyType), // this is never used so it may be undefined, but that triggers ub protection
+        .value = @intCast(fullList.len),
         .next = 0,
       }, defaults.Endian);
 
+      // Write keys length (+1 for the extra entry at the end)
+      try writer.writeInt(u64, (list.items.len + 1) * @sizeOf(TableKey), defaults.Endian);
 
       // Write values
       var index: u32 = 0;
+      var val: Val = 0;
       for (fullList) |item| {
-        if (meta.arrAsUint(item.k[0..Len-1]) != meta.arrAsUint(list.items[index].k[0..Len-1])) index += 1;
+        if (meta.arrAsUint(item.k[0..Len-1]) != meta.arrAsUint(list.items[index].key)) {
+          index += 1;
+          val = 0;
+          std.debug.assert(index < list.items.len);
+          std.debug.assert(meta.arrAsUint(item.k[0..Len-1]) == meta.arrAsUint(list.items[index].key));
+        }
 
-        var start: u32 = list.items[index].n;
-        var end: u32 = list.items[index + 1].n;
         var mid: u32 = undefined;
+        var start: u32 = list.items[index].next;
+        var end: u32 = @intCast(list.items.len);
         while (start < end) {
           mid = start + (end - start) / 2;
-          if (fullList[mid].k[Len-1] < item.k[Len-1]) {
-            start = mid + 1;
-          } else if (fullList[mid].k[Len-1] > item.k[Len-1]) {
-            end = mid;
-          } else {
-            break;
+          switch (std.mem.order(Key, list.items[mid].key[0..], item.k[1..])) {
+            .lt => start = mid + 1,
+            .gt => end = mid,
+            .eq => break,
           }
         }
 
+        if (builtin.mode == .Debug and !std.mem.eql(Key, item.k[1..], list.items[mid].key[0..])) {
+          std.debug.print("Expected: {}\n", .{ item });
+          std.debug.print("Start: {}\n", .{ list.items[list.items[index].next] });
+          std.debug.print("Mid: {}\n", .{ list.items[mid] });
+          unreachable;
+        }
+
+        val += item.v;
         try writer.writeStructEndian(TableVal{
-          .val = item.v,
-          .subnext = @intCast(mid - start),
+          .val = val,
+          .subnext = @intCast(mid - list.items[index].next),
         }, defaults.Endian);
       }
+
+      try writer.writeInt(u64, (fullList.len) * @sizeOf(TableVal), defaults.Endian);
     }
 
     pub fn deinit(self: *Self) void {
