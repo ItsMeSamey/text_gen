@@ -24,8 +24,6 @@ pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
     /// index for last random word generated
     options: Options,
 
-    const Self = @This();
-
     /// Options passed to the init function
     pub const Options = struct {
       /// RNG device used for random index generation
@@ -46,7 +44,7 @@ pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
 
     /// Initialize with given options.
     /// If the all options are null (i.e. `.{}`), it's better (faster) to use `default()` instead
-    pub fn init(options: OptionalOptions) Self {
+    pub fn init(options: OptionalOptions) @This() {
       if (comptimeOptions.defaultData.len == 0 and options.data == null) {
         const s = @src();
         @panic(
@@ -55,7 +53,7 @@ pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
         );
       }
 
-      var retval = Self {
+      var retval = @This() {
         .options = Options.default(),
       };
 
@@ -69,7 +67,7 @@ pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
     }
 
     /// Return a random word from `self.data`.
-    pub fn gen(self: *Self) []const u8 {
+    pub fn gen(self: *@This()) []const u8 {
       self.at = comptimeOptions.rngFn(self.options.random, self.at, @truncate(self.options.data.len));
       self.at = if (std.mem.indexOfScalarPos(u8, self.options.data, self.at, '\x00')) |idx| @truncate(idx + 1) else 0;
 
@@ -80,7 +78,7 @@ pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
     /// Gives the word next to current word using `self.at`.
     /// If at the end of a file gives the first word of `self.data`.
     /// NOTE: This is deterministic and thus NOT random
-    pub fn next(self: *Self) []const u8 {
+    pub fn next(self: *@This()) []const u8 {
       const start = self.at;
       const end = std.mem.indexOfScalarPos(u8, self.options.data, self.at, '\x00') orelse self.options.data.len;
       defer self.at = if (end + 1 < self.options.data.len) @truncate(end + 1) else 0;
@@ -88,15 +86,10 @@ pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
     }
 
     const GenInterface = @import("genInterface.zig");
-    pub fn any(genWords: anytype) GenInterface.WordGenerator {
-      const generatorType = @typeInfo(@TypeOf(genWords)).pointer.child;
-      const converter = GenInterface.GetConverter(generatorType, generatorType.gen, null, null);
-      return .{
-        .ptr = @ptrCast(genWords),
-        ._gen = converter.gen,
-        ._roll = converter.roll,
-        ._free = converter.free,
-      };
+    /// You must keep the original struct alive (and not move it)) for the returned `WordGenerator` to be valid
+    /// Similar to rust's Pin<>
+    pub fn any(self: *@This()) GenInterface.WordGenerator {
+      return GenInterface.autoConvert(self);
     }
   };
 }
