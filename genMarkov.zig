@@ -1,4 +1,3 @@
-test { std.testing.refAllDeclsRecursive(@This()); }
 const std = @import("std");
 const Stats = @import("common/markov/markovStats.zig");
 const meta = @import("common/markov/meta.zig");
@@ -32,8 +31,9 @@ fn getOffsetsFromData(stats: Stats.ModelStats, data: []const u8) !Offsets {
     d: @TypeOf(data),
     stats: Stats.ModelStats,
     pub fn load(self: *@This()) Stats.Range {
-      const r = Stats.Range{ .start = readOne(u64, self.stats.endian, self.d, self.d.len - @sizeOf(u64)), .end = self.d.len - @sizeOf(u64)};
-      self.d = self.d[0..self.d.len - r.start - @sizeOf(u64)];
+      const len: u64 = readOne(u64, self.stats.endian, self.d, self.d.len - @sizeOf(u64));
+      self.d.len -= len + @sizeOf(u64);
+      const r = Stats.Range{ .start = self.d.len, .end = self.d.len + len };
       return r;
     }
   }{
@@ -47,8 +47,9 @@ fn getOffsetsFromData(stats: Stats.ModelStats, data: []const u8) !Offsets {
     retval.conversionTable = loader.load();
   }
 
-  retval.keys = loader.load();
   retval.vals = loader.load();
+  retval.keys = loader.load();
+
   return retval;
 }
 
@@ -94,11 +95,15 @@ fn getMarkovGenInterface(comptime init: InitType, data: []const u8, allocator: s
         inline .u32, .u64 => |V| {
           // V now comptime
           const Val: type = Stats.ValEnum.Type(V);
+          const TableKey = meta.TableKey(Key, Val);
+          const TableVal = meta.TableVal(Key, Val);
+
+          std.debug.assert(@rem(keys.len, @sizeOf(TableKey)) == 0);
+          std.debug.assert(@rem(vals.len, @sizeOf(TableVal)) == 0);
+
           switch (stats.endian) {
             inline .little, .big => |Endianness| {
               const swapEndianness = struct {
-                const TableKey = meta.TableKey(Key, Val);
-                const TableVal = meta.TableVal(Key, Val);
                 fn swapEndianness(keySlice: []u8, valSlice: []u8) void {
                   meta.swapEndianness(@as([*]TableKey, @alignCast(@ptrCast(keySlice.ptr)))[0..keySlice.len/@sizeOf(Key)]);
                   meta.swapEndianness(@as([*]TableVal, @alignCast(@ptrCast(valSlice.ptr)))[0..valSlice.len/@sizeOf(Val)]);
@@ -109,18 +114,18 @@ fn getMarkovGenInterface(comptime init: InitType, data: []const u8, allocator: s
               // All of the switch cases here are (or atleast are supposed to be) comptime
               const Model = GetMarkovGen(Key, Val, if (Endianness != CpuEndianness and init == .immutable_uncopyable) Endianness else CpuEndianness);
               const freeableSliceSize = @sizeOf(Model) + (if (Endianness != CpuEndianness and init == .immutable_copyable) keys.len + vals.len else 0);
-              const freeableSlice = try allocator.alloc(u8, freeableSliceSize);
+              const freeableSlice = try allocator.alignedAlloc(u8, @alignOf(Model), freeableSliceSize);
 
-              var model: *Model = @alignCast(@ptrCast(freeableSlice[0..@sizeOf(Model)].ptr));
+              var model: *Model = @ptrCast(freeableSlice[0..@sizeOf(Model)].ptr);
               if (Endianness == CpuEndianness) {
-                try model.initFragments(keys, vals, convTable, allocator, freeableSlice);
+                try model.initFragments(keys, vals, convTable, allocator, freeableSliceSize);
               } else {
                 switch (init) {
                   .mutable => {
                     const mutableKeys = @constCast(keys);
                     const mutableVals = @constCast(vals);
                     swapEndianness(mutableKeys, mutableVals);
-                    try model.initFragments(mutableKeys, mutableVals, convTable, allocator, freeableSlice);
+                    try model.initFragments(mutableKeys, mutableVals, convTable, allocator, freeableSliceSize);
                   },
                   .immutable_copyable => {
                     const mutableKeys = freeableSlice[@sizeOf(Model)..][0..keys.len];
@@ -128,10 +133,10 @@ fn getMarkovGenInterface(comptime init: InitType, data: []const u8, allocator: s
                     @memcpy(mutableKeys, keys);
                     @memcpy(mutableVals, vals);
                     swapEndianness(mutableKeys, mutableVals);
-                    try model.initFragments(mutableKeys, mutableVals, convTable, allocator, freeableSlice);
+                    try model.initFragments(mutableKeys, mutableVals, convTable, allocator, freeableSliceSize);
                   },
                   .immutable_uncopyable => {
-                    try model.initFragments(keys, vals, convTable, allocator, freeableSlice);
+                    try model.initFragments(keys, vals, convTable, allocator, freeableSliceSize);
                   },
                 }
               }
@@ -147,11 +152,9 @@ fn getMarkovGenInterface(comptime init: InitType, data: []const u8, allocator: s
 
 fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
   const read = struct {
-    fn read(comptime Output: type, data: [*]const u8, index: usize) Output {
-      // NOTE: This may cause problems as alignment may not be guaranteed
-      const optr: *const Output = @ptrCast(@alignCast(data[@sizeOf(Output) * index..][0 .. @sizeOf(Output)]));
-      var oval = optr.*;
-      if (CpuEndianness != Endianness) std.mem.byteSwapAllFields(Output, &oval);
+    fn read(_: type, slice: anytype, index: usize) std.meta.Elem(@TypeOf(slice)) {
+      var oval = slice[index];
+      if (CpuEndianness != Endianness) std.mem.byteSwapAllFields(@TypeOf(oval), &oval);
       return oval;
     }
   }.read;
@@ -162,25 +165,18 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
   // key generator
   const Generator = struct {
     /// table of keys
-    keys: [*]const u8,
+    keys: []align(1) const TableKey,
     /// table of values to the keys
-    vals: [*]const u8,
-
-    /// Does not include the last key (an empty last key to make logic of gen simpler)
-    keyCount: u32,
-    /// The number of values
-    valCount: u32,
+    vals: []align(1) const TableVal,
 
     /// index in the keys table
-    keyIndex: u32,
+    keyIndex: usize,
 
     /// The random number generator
     random: std.Random,
 
-    const Self = @This();
-
     /// Generate a key, a key may or may not translate to a full word
-    fn gen(self: *Self) Key {
+    fn gen(self: *@This()) Key {
       const key0 = read(TableKey, self.keys, self.keyIndex);
       const key1 = read(TableKey, self.keys, self.keyIndex+1);
 
@@ -190,25 +186,25 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
       var mid: usize = undefined;
 
       while (start < end) {
-        mid = (end - start) / 2;
+        mid = start + (end - start) / 2;
         const midVal = read(TableVal, self.vals, mid).val;
 
-        if (target < midVal) {
-          end = mid;
-        } else {
+        if (target > midVal) {
           start = mid + 1;
+        } else {
+          end = mid;
         }
       }
 
-      const val = read(TableVal, self.vals, mid);
+      const val = read(TableVal, self.vals, start);
       self.keyIndex = @intCast(key0.next + val.subnext);
 
       return key0.key;
     }
 
     /// Refresh the cindex to random
-    pub fn roll(self: *Self) void {
-      self.keyIndex = self.random.intRangeLessThan(u32, 0, self.keyCount);
+    pub fn roll(self: *@This()) void {
+      self.keyIndex = self.random.intRangeLessThan(usize, 0, self.keys.len);
     }
   };
 
@@ -216,8 +212,11 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
     buffer: [256]u8,
     present: u8,
 
-    fn convert(self: *@This(), input: Key) ?[]const u8 {
-      if (input == '\x00') return self.buffer[0..self.present];
+    fn convert(self: *@This(), input: u8) ?[]const u8 {
+      if (input == '\x00') {
+        defer self.present = 0;
+        return self.buffer[0..self.present];
+      }
 
       self.buffer[self.present] = input;
       self.present += 1;
@@ -225,8 +224,7 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
     }
   } else struct {
     convTable: [*]const u8,
-    table: [*]const u32,
-    tableCount: u32,
+    table: []const u32,
 
     fn init(convTable: []const u8, allocator: std.mem.Allocator) !@This() {
       var table = std.ArrayList(u32).init(allocator);
@@ -240,20 +238,18 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
       }
       try table.append(@intCast(convTable.len + 1));
 
-      const ts = try table.toOwnedSlice();
       return .{
         .convTable = convTable.ptr,
-        .table = ts.ptr,
-        .tableCount = @intCast(ts.len),
+        .table = try table.toOwnedSlice(),
       };
     }
 
     fn convert(self: *const @This(), input: Key) []const u8 {
-      return self.convTable[self.table[input]..self.table[input + 1]-1];
+      return self.convTable[self.table[input]..self.table[@as(usize, input) + 1]-1];
     }
 
     fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
-      allocator.free(self.table[0..self.tableCount]);
+      allocator.free(self.table);
     }
   };
 
@@ -262,17 +258,13 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
     converter: Converter,
     /// Allocator for freeableSlice
     allocator: std.mem.Allocator,
-    freeableSlice: []const u8,
+    freeableSliceSize: usize,
     
-    const Self = @This();
-
-    fn initFragments(self: *Self, keys: []const u8, vals: []const u8, convTable: ?[]const u8, allocator: std.mem.Allocator, freeableSlice: []const u8) !void {
+    fn initFragments(self: *@This(), keys: []const u8, vals: []const u8, convTable: ?[]const u8, allocator: std.mem.Allocator, freeableSliceSize: usize) !void {
       self.* = .{
         .generator = .{
-          .keys = keys.ptr,
-          .vals = vals.ptr,
-          .keyCount = @intCast(keys.len / @sizeOf(TableKey)),
-          .valCount = @intCast(vals.len / @sizeOf(TableVal)),
+          .keys = std.mem.bytesAsSlice(TableKey, keys),
+          .vals = std.mem.bytesAsSlice(TableVal, vals),
           .keyIndex = 0,
           .random = @import("common/rng.zig").getRandom(),
         },
@@ -281,37 +273,84 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
           .present = 0,
         } else try Converter.init(convTable.?, allocator),
         .allocator = allocator,
-        .freeableSlice = freeableSlice,
+        .freeableSliceSize = freeableSliceSize,
       };
+
+      if (Key == u8) {
+        _ = self.gen();
+      }
     }
 
-    pub fn gen(self: *Self) []const u8 {
+    pub fn gen(self: *@This()) []const u8 {
       if (Key == u8) {
-        while (true) { if (self.converter.convert(self.generator.gen())) |retval| return retval; }
+        while (true) {
+          if (self.converter.convert(self.generator.gen())) |retval| {
+            return retval;
+          }
+        }
       }
       return self.converter.convert(self.generator.gen());
     }
 
-    pub fn roll(self: *Self) void {
+    pub fn roll(self: *@This()) void {
       self.generator.roll();
     }
 
-    pub fn free(self: *Self) void {
+    pub fn free(self: *@This()) void {
       if (Key != u8) {
         self.converter.deinit(self.allocator);
       }
-      self.allocator.free(self.freeableSlice);
+      const memory: [*]align(@alignOf(@This())) u8 = @ptrCast(self);
+
+      // IDK why, but freeing normally causes "General protection exception (no address available)"
+      @call(std.builtin.CallModifier.auto, std.mem.Allocator.free, .{self.allocator, memory[0..self.freeableSliceSize]});
     }
 
-    pub fn any(self: *Self) GenInterface.WordGenerator {
-      const converter = GenInterface.GetConverter(Self, Self.gen, Self.roll, Self.free);
-      return .{
-        .ptr = @ptrCast(self),
-        ._gen = converter.gen,
-        ._roll = converter.roll,
-        ._free = converter.free,
-      };
+    pub fn any(self: *@This()) GenInterface.WordGenerator {
+      return GenInterface.autoConvert(self);
     }
   };
+}
+
+test {
+  std.testing.refAllDecls(@This());
+}
+
+test "char_markov" {
+  const allocator = std.testing.allocator;
+  var data_dir = try std.fs.cwd().makeOpenPath("data", .{});
+  defer data_dir.close();
+
+  const data = try data_dir.readFileAlloc(allocator, "markov.char", std.math.maxInt(usize));
+  defer allocator.free(data);
+
+  var gen = try initMutable(data, allocator);
+  defer gen.free();
+
+  std.debug.print("\nChar Markov:", .{});
+  for (0..1024) |_| {
+    const word = gen.gen();
+    std.debug.print(" {s}", .{word});
+  }
+  std.debug.print("\n", .{});
+}
+
+test "word_markov" {
+  const allocator = std.testing.allocator;
+  var data_dir = try std.fs.cwd().makeOpenPath("data", .{});
+  defer data_dir.close();
+
+  const data = try data_dir.readFileAlloc(allocator, "markov.word", std.math.maxInt(usize));
+  defer allocator.free(data);
+
+  var gen = try initMutable(data, allocator);
+  defer gen.free();
+
+  std.debug.print("\nWord Markov:", .{});
+  for (0..1024) |_| {
+    const word = gen.gen();
+    std.debug.print(" {s}", .{word});
+  }
+  std.debug.print("\n", .{});
 }
 
