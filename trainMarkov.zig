@@ -146,12 +146,50 @@ test {
   std.testing.refAllDecls(WordMakov(4));
 }
 
+fn readAllMerged(allocator: std.mem.Allocator, dir: std.fs.Dir) ![]u8 {
+  var walker = try dir.walk(allocator);
+  defer walker.deinit();
+
+  var files = std.ArrayListUnmanaged(std.fs.File){};
+  defer {
+    for (files.items) |*file| file.close();
+    files.deinit(allocator);
+  }
+
+  var size: usize = 0;
+  while (try walker.next()) |entry| {
+    var file = try entry.dir.openFile(entry.basename, .{});
+    const stats = try file.stat();
+    size += stats.size + 1; // +1 for the extra newline
+    try files.append(allocator, file);
+  }
+
+  var memory = try allocator.alloc(u8, size);
+  errdefer allocator.free(memory);
+
+  size = 0;
+  for (files.items) |file| {
+    const n = try file.readAll(memory[size..]);
+    std.debug.assert(n < memory[size..].len);
+    size += n;
+    memory[size] = '\n';
+    size += 1;
+  }
+
+  std.debug.assert(size == memory.len);
+
+  return memory;
+}
+
 fn filterAllowed(str: []u8) []u8 {
   var idx: usize = 0;
   var encountered: bool = false;
   for (str) |char_| {
     const char = std.ascii.toLower(char_);
-    if (char >= 'a' and char <= 'z') {
+    if (
+      (char >= 'a' and char <= 'z') or
+      (char >= '0' and char <= '9')
+    ) {
       if (encountered) {
         encountered = false;
         str[idx] = '\x00';
@@ -180,28 +218,39 @@ pub fn main() !void {
   var data_dir = try std.fs.cwd().openDir("data", .{});
   defer data_dir.close();
 
-  const file_text = try data_dir.readFileAlloc(allocator, "markov.txt", std.math.maxInt(usize));
+  var markov_dir = try data_dir.openDir("markov", .{ .iterate = true, .no_follow = true });
+  defer markov_dir.close();
+
+  const file_text = try readAllMerged(allocator, markov_dir);
   defer allocator.free(file_text);
   const training_data = filterAllowed(file_text);
 
-  // std.debug.print("Training data: {s}\n", .{training_data});
+  // std.debug.print("Training data: {s}\n", .{file_text});
 
   { // Train word makov model
-    var word_makov = try WordMakov(3).init(allocator);
-    defer word_makov.deinit();
-    try word_makov.train(training_data);
+    var makov = try WordMakov(4).init(allocator);
+    defer makov.deinit();
+    try makov.train(training_data);
 
-    var word_markov_file = try data_dir.createFile("markov.word", .{});
-    try word_makov.write(word_markov_file.writer().any());
+    var markov_file = try data_dir.createFile("markov.word", .{});
+    defer markov_file.close();
+
+    var buffered = std.io.bufferedWriter(markov_file.writer().any());
+    try makov.write(buffered.writer().any());
+    try buffered.flush();
   }
 
   { // Train char makov model
-    var char_makov = try CharMakov(6).init(allocator);
-    defer char_makov.deinit();
-    try char_makov.train(training_data);
+    var makov = try CharMakov(8).init(allocator);
+    defer makov.deinit();
+    try makov.train(training_data);
 
-    var char_markov_file = try data_dir.createFile("markov.char", .{});
-    try char_makov.write(char_markov_file.writer().any());
+    var markov_file = try data_dir.createFile("markov.char", .{});
+    defer markov_file.close();
+
+    var buffered = std.io.bufferedWriter(markov_file.writer().any());
+    try makov.write(buffered.writer().any());
+    try buffered.flush();
   }
 }
 
