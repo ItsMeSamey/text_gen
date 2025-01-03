@@ -226,31 +226,40 @@ pub fn main() !void {
   const training_data = filterAllowed(file_text);
 
   // std.debug.print("Training data: {s}\n", .{file_text});
+  var timer = try std.time.Timer.start();
 
   { // Train word makov model
-    var makov = try WordMakov(4).init(allocator);
+    var makov = try WordMakov(6).init(allocator);
     defer makov.deinit();
+    timer.reset();
     try makov.train(training_data);
+    std.debug.print("Word Makov took {d}ms\n", .{@as(f128, @floatFromInt(timer.read()))/@as(f128, @floatFromInt(std.time.ns_per_ms))});
 
     var markov_file = try data_dir.createFile("markov.word", .{});
     defer markov_file.close();
 
     var buffered = std.io.bufferedWriter(markov_file.writer().any());
+    timer.reset();
     try makov.write(buffered.writer().any());
     try buffered.flush();
+    std.debug.print("Word Makov write took {d}ms\n", .{@as(f128, @floatFromInt(timer.read()))/@as(f128, @floatFromInt(std.time.ns_per_ms))});
   }
 
   { // Train char makov model
-    var makov = try CharMakov(8).init(allocator);
+    var makov = try CharMakov(10).init(allocator);
     defer makov.deinit();
+    timer.reset();
     try makov.train(training_data);
+    std.debug.print("Char Makov took {d}ms\n", .{@as(f128, @floatFromInt(timer.read()))/@as(f128, @floatFromInt(std.time.ns_per_ms))});
 
     var markov_file = try data_dir.createFile("markov.char", .{});
     defer markov_file.close();
 
     var buffered = std.io.bufferedWriter(markov_file.writer().any());
+    timer.reset();
     try makov.write(buffered.writer().any());
     try buffered.flush();
+    std.debug.print("Char Makov write took {d}ms\n", .{@as(f128, @floatFromInt(timer.read()))/@as(f128, @floatFromInt(std.time.ns_per_ms))});
   }
 }
 
