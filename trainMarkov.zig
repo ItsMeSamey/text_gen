@@ -50,7 +50,7 @@ pub fn CharMakov(Len: comptime_int) type {
 }
 
 pub fn WordMakov(Len: comptime_int) type {
-  const Table = std.StringArrayHashMap(u32);
+  const Table = std.StringArrayHashMapUnmanaged(u32);
   const CyclicList = GenCyclicList(Len, defaults.WordKey);
   const Base = MarkovBase.GenBase(Len, defaults.WordKey, defaults.Val);
 
@@ -58,10 +58,8 @@ pub fn WordMakov(Len: comptime_int) type {
     /// The base containing the modal
     base: Base,
     /// Lookup table for pointer to a specific word
-    table: Table,
+    table: Table = .{},
 
-    /// Total count of words in this model
-    count: u32 = 0,
     /// The cyclic list use for internal stuff
     cyclicList: CyclicList = .{},
     beginning: [Len-1]defaults.Val = undefined,
@@ -70,7 +68,6 @@ pub fn WordMakov(Len: comptime_int) type {
     pub fn init(allocator: std.mem.Allocator) !@This() {
       return .{
         .base = Base.init(allocator),
-        .table = Table.init(allocator),
       };
     }
 
@@ -106,8 +103,7 @@ pub fn WordMakov(Len: comptime_int) type {
         const str = try self.table.allocator.alloc(u8, val.len);
         @memcpy(str, val);
         result.key_ptr.* = str;
-        result.value_ptr.* = self.count;
-        self.count += 1;
+        result.value_ptr.* = self.table.count();
       }
 
       self.cyclicList.push(result.value_ptr.*);
@@ -126,27 +122,9 @@ pub fn WordMakov(Len: comptime_int) type {
         }
       }
 
-      const kvList: struct {
-        k: @TypeOf(self.table.keys()),
-        v: @TypeOf(self.table.values()),
-
-        pub fn lessThan(ctx: @This(), l: usize, r: usize) bool {
-          return ctx.v[l] < ctx.v[r];
-        }
-        pub fn swap(ctx: @This(), l: usize, r: usize) void {
-          std.mem.swap(std.meta.Child(@TypeOf(ctx.k)), &ctx.k[l], &ctx.k[r]);
-          std.mem.swap(std.meta.Child(@TypeOf(ctx.v)), &ctx.v[l], &ctx.v[r]);
-        }
-      } = .{
-        .k = self.table.keys(),
-        .v = self.table.values(),
-      };
-
-      // heap sorting our list
-      std.sort.pdqContext(0, kvList.k.len, kvList);
-
       var count: u64 = 0;
-      for (kvList.k) |key| {
+      // since insertion order is preserved, we can just write the keys like this
+      for (self.table.keys()) |key| {
         count += key.len + 1; // +1 for the null terminator
         try writer.writeAll(key);
         try writer.writeAll(&[_]u8{0});
