@@ -147,8 +147,9 @@ pub fn WordMakov(Len: comptime_int) type {
 
       var count: u64 = 0;
       for (kvList.k) |key| {
-        count += key.len;
+        count += key.len + 1; // +1 for the null terminator
         try writer.writeAll(key);
+        try writer.writeAll(&[_]u8{0});
       }
       try writer.writeInt(u64, count, defaults.Endian);
     }

@@ -142,7 +142,7 @@ fn getMarkovGenInterface(comptime init: InitType, data: []const u8, allocator: s
               }
 
               return model.any();
-            } 
+            }
           }
         }
       }
@@ -209,8 +209,8 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
   };
 
   const Converter = if (Key == u8) struct {
-    buffer: [256]u8,
-    present: u8,
+    buffer: [256]u8 = undefined,
+    present: u8 = 0,
 
     fn convert(self: *@This(), input: u8) ?[]const u8 {
       if (input == '\x00') {
@@ -223,33 +223,12 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
       return null;
     }
   } else struct {
-    convTable: [*]const u8,
-    table: []const u32,
-
-    fn init(convTable: []const u8, allocator: std.mem.Allocator) !@This() {
-      var table = std.ArrayList(u32).init(allocator);
-      errdefer table.deinit();
-
-      var i: u32 = 0;
-      while (i < convTable.len) {
-        try table.append(i);
-        while (convTable[i] != '\x00') i += 1;
-        i += 1;
-      }
-      try table.append(@intCast(convTable.len + 1));
-
-      return .{
-        .convTable = convTable.ptr,
-        .table = try table.toOwnedSlice(),
-      };
-    }
+    convTable: []const u8,
 
     fn convert(self: *const @This(), input: Key) []const u8 {
-      return self.convTable[self.table[input]..self.table[@as(usize, input) + 1]-1];
-    }
-
-    fn deinit(self: *const @This(), allocator: std.mem.Allocator) void {
-      allocator.free(self.table);
+      const startSlice = self.convTable[input..];
+      const till = std.mem.indexOfScalar(u8, startSlice, '\x00') orelse return startSlice;
+      return startSlice[0..till];
     }
   };
 
@@ -268,10 +247,7 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
           .keyIndex = 0,
           .random = @import("common/rng.zig").getRandom(),
         },
-        .converter = if (Key == u8) .{
-          .buffer = undefined,
-          .present = 0,
-        } else try Converter.init(convTable.?, allocator),
+        .converter = if (Key == u8) .{} else .{ .convTable = convTable.? },
         .allocator = allocator,
         .freeableSliceSize = freeableSliceSize,
       };
@@ -297,12 +273,9 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
     }
 
     pub fn free(self: *@This()) void {
-      if (Key != u8) {
-        self.converter.deinit(self.allocator);
-      }
       const memory: [*]align(@alignOf(@This())) u8 = @ptrCast(self);
 
-      // IDK why, but freeing normally causes "General protection exception (no address available)"
+      // IDK why, but calling allocator.free normally causes "General protection exception (no address available)"
       @call(std.builtin.CallModifier.auto, std.mem.Allocator.free, .{self.allocator, memory[0..self.freeableSliceSize]});
     }
 
