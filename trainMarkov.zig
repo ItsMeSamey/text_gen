@@ -60,8 +60,8 @@ pub fn WordMakov(Len: comptime_int) type {
     /// Lookup table for pointer to a specific word
     table: Table,
 
-    /// The length of the text portion (concatenation of the words)
-    length: u32 = 0,
+    /// Total count of words in this model
+    count: u32 = 0,
     /// The cyclic list use for internal stuff
     cyclicList: CyclicList = .{},
     beginning: [Len-1]defaults.Val = undefined,
@@ -106,8 +106,8 @@ pub fn WordMakov(Len: comptime_int) type {
         const str = try self.table.allocator.alloc(u8, val.len);
         @memcpy(str, val);
         result.key_ptr.* = str;
-        result.value_ptr.* = self.length;
-        self.length += @intCast(val.len);
+        result.value_ptr.* = self.count;
+        self.count += 1;
       }
 
       self.cyclicList.push(result.value_ptr.*);
