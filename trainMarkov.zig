@@ -50,7 +50,7 @@ pub fn CharMakov(Len: comptime_int) type {
 }
 
 pub fn WordMakov(Len: comptime_int) type {
-  const Table = std.StringArrayHashMapUnmanaged(u32);
+  const Table = std.StringArrayHashMap(u32);
   const CyclicList = GenCyclicList(Len, defaults.WordKey);
   const Base = MarkovBase.GenBase(Len, defaults.WordKey, defaults.Val);
 
@@ -58,7 +58,7 @@ pub fn WordMakov(Len: comptime_int) type {
     /// The base containing the modal
     base: Base,
     /// Lookup table for pointer to a specific word
-    table: Table = .{},
+    table: Table,
 
     /// The cyclic list use for internal stuff
     cyclicList: CyclicList = .{},
@@ -68,6 +68,7 @@ pub fn WordMakov(Len: comptime_int) type {
     pub fn init(allocator: std.mem.Allocator) !@This() {
       return .{
         .base = Base.init(allocator),
+        .table = Table.init(allocator),
       };
     }
 
@@ -103,7 +104,7 @@ pub fn WordMakov(Len: comptime_int) type {
         const str = try self.table.allocator.alloc(u8, val.len);
         @memcpy(str, val);
         result.key_ptr.* = str;
-        result.value_ptr.* = self.table.count();
+        result.value_ptr.* = @intCast(self.table.count());
       }
 
       self.cyclicList.push(result.value_ptr.*);

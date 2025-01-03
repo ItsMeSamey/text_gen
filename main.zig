@@ -85,7 +85,7 @@ pub fn main() !void {
   var timer = try std.time.Timer.start();
 
   { // Train word makov model
-    var makov = try WordMakov(6).init(allocator);
+    var makov = try WordMakov(4).init(allocator);
     defer makov.deinit();
     timer.reset();
     try makov.train(training_data);
@@ -102,7 +102,7 @@ pub fn main() !void {
   }
 
   { // Train char makov model
-    var makov = try CharMakov(10).init(allocator);
+    var makov = try CharMakov(8).init(allocator);
     defer makov.deinit();
     timer.reset();
     try makov.train(training_data);
