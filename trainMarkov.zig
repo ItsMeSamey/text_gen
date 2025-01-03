@@ -1,10 +1,10 @@
 const std = @import("std");
-const GenBase = @import("common/markov/markovBase.zig").GenBase;
+const MarkovBase = @import("common/markov/markovBase.zig");
 const defaults = @import("common/markov/defaults.zig");
 const GenCyclicList = @import("common/markov/cyclicList.zig").GenCyclicList;
 
-fn CharMakov(Len: comptime_int) type {
-  const Base = GenBase(Len, defaults.CharKey, defaults.Val);
+pub fn CharMakov(Len: comptime_int) type {
+  const Base = MarkovBase.GenBase(Len, defaults.CharKey, defaults.Val);
   const CyclicList = GenCyclicList(Len, u8);
 
   return struct {
@@ -49,17 +49,19 @@ fn CharMakov(Len: comptime_int) type {
   };
 }
 
-fn WordMakov(Len: comptime_int) type {
+pub fn WordMakov(Len: comptime_int) type {
   const Table = std.StringArrayHashMap(u32);
   const CyclicList = GenCyclicList(Len, defaults.WordKey);
-  const Base = GenBase(Len, defaults.WordKey, defaults.Val);
+  const Base = MarkovBase.GenBase(Len, defaults.WordKey, defaults.Val);
 
   return struct {
     /// The base containing the modal
     base: Base,
     /// Lookup table for pointer to a specific word
     table: Table,
-    count: u32 = 0,
+
+    /// The length of the text portion (concatenation of the words)
+    length: u32 = 0,
     /// The cyclic list use for internal stuff
     cyclicList: CyclicList = .{},
     beginning: [Len-1]defaults.Val = undefined,
@@ -104,8 +106,8 @@ fn WordMakov(Len: comptime_int) type {
         const str = try self.table.allocator.alloc(u8, val.len);
         @memcpy(str, val);
         result.key_ptr.* = str;
-        result.value_ptr.* = self.count;
-        self.count += 1;
+        result.value_ptr.* = self.length;
+        self.length += @intCast(val.len);
       }
 
       self.cyclicList.push(result.value_ptr.*);
@@ -124,11 +126,29 @@ fn WordMakov(Len: comptime_int) type {
         }
       }
 
+      const kvList: struct {
+        k: @TypeOf(self.table.keys()),
+        v: @TypeOf(self.table.values()),
+
+        pub fn lessThan(ctx: @This(), l: usize, r: usize) bool {
+          return ctx.v[l] < ctx.v[r];
+        }
+        pub fn swap(ctx: @This(), l: usize, r: usize) void {
+          std.mem.swap(std.meta.Child(@TypeOf(ctx.k)), &ctx.k[l], &ctx.k[r]);
+          std.mem.swap(std.meta.Child(@TypeOf(ctx.v)), &ctx.v[l], &ctx.v[r]);
+        }
+      } = .{
+        .k = self.table.keys(),
+        .v = self.table.values(),
+      };
+
+      // heap sorting our list
+      std.sort.pdqContext(0, kvList.k.len, kvList);
+
       var count: u64 = 0;
-      for (self.table.keys()) |key| {
-        count += key.len + 1; // +1 for null terminator
+      for (kvList.k) |key| {
+        count += key.len;
         try writer.writeAll(key);
-        try writer.writeAll(&[_]u8{0});
       }
       try writer.writeInt(u64, count, defaults.Endian);
     }
@@ -177,7 +197,6 @@ fn readAllMerged(allocator: std.mem.Allocator, dir: std.fs.Dir) ![]u8 {
   }
 
   std.debug.assert(size == memory.len);
-
   return memory;
 }
 

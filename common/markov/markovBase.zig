@@ -45,22 +45,13 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
     /// Writes the data to `writer` and deinitializes this object and hence should be only called once
     /// `MinKeyType` tells us what is the minimum possible int size needed for key values
     /// `MinKeyType` = `u8` must be used only for char model
-    const TimingStats = struct {
-      prep: f64,
-      keys: f64,
-      values: f64,
-    };
-
-    pub fn write(self: *Self, writer: std.io.AnyWriter, comptime MinKeyType: type) !TimingStats {
+    pub fn write(self: *Self, writer: std.io.AnyWriter, comptime MinKeyType: type) !void {
       try MarkovModelStats.init(Len, MinKeyType, Val, defaults.Endian).flush(writer);
 
       const TableKey = meta.TableKey(MinKeyType, Val);
       const TableVal = meta.TableVal(MinKeyType, Val);
 
       const fullList = self.map.keys();
-
-      var timer = try std.time.Timer.start();
-      var retval: TimingStats = undefined;
 
       std.sort.pdq(kvp, fullList, {}, struct {
         fn lessThanFn(_: void, lhs: kvp, rhs: kvp) bool {
@@ -84,8 +75,6 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
           .from = @intCast(from),
         });
       }
-      retval.prep = @as(f64, @floatFromInt(timer.read()))/@as(f64, @floatFromInt(std.time.ns_per_ms));
-      timer.reset();
 
       // Write keys
       for (list.items) |*entry| {
@@ -134,9 +123,6 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
       // Write keys length (+1 for the extra entry at the end)
       try writer.writeInt(u64, (list.items.len + 1) * @sizeOf(TableKey), defaults.Endian);
 
-      retval.keys = @as(f64, @floatFromInt(timer.read()))/@as(f64, @floatFromInt(std.time.ns_per_ms));
-      timer.reset();
-
       // Write values
       var index: u32 = 0;
       var val: Val = 0;
@@ -175,9 +161,6 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
       }
 
       try writer.writeInt(u64, (fullList.len) * @sizeOf(TableVal), defaults.Endian);
-
-      retval.values = @as(f64, @floatFromInt(timer.read()))/@as(f64, @floatFromInt(std.time.ns_per_ms));
-      return retval;
     }
 
     pub fn deinit(self: *Self) void {
