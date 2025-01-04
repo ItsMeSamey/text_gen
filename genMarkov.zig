@@ -92,7 +92,7 @@ fn getMarkovGenInterface(comptime init: InitType, data: []const u8, allocator: s
       // K now comptime
       const Key: type = Stats.KeyEnum.Type(K);
       switch (stats.val) {
-        inline .u32, .u64 => |V| {
+        inline .u16, .u32 => |V| {
           // V now comptime
           const Val: type = Stats.ValEnum.Type(V);
           const TableKey = meta.TableKey(Key, Val);

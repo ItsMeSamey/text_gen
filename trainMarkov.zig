@@ -62,7 +62,7 @@ pub fn WordMakov(Len: usize) type {
 
     /// The cyclic list use for internal stuff
     cyclicList: CyclicList = .{},
-    beginning: [Len-1]defaults.Val = undefined,
+    beginning: [Len-1]defaults.WordKey = undefined,
 
     /// Create the instance of `@This()` object
     pub fn init(allocator: std.mem.Allocator) !@This() {
@@ -74,6 +74,7 @@ pub fn WordMakov(Len: usize) type {
 
     /// You can call this multiple times to train with multiple files.
     /// NOTE: **no** references to `data` are stored so it *can* be deleted immediately after this call
+    /// If length of words in data is less than the chain length, this function will return error.InsufficientData
     pub fn train(self: *@This(), data: []const u8) !void {
       var iterator = std.mem.tokenizeScalar(u8, data, 0);
       for (0..Len-1) |_| {
@@ -116,9 +117,9 @@ pub fn WordMakov(Len: usize) type {
       if (std.math.maxInt(u64) < self.table.count()) @panic("Table too large!");
 
       inline for (1..4) |intLen| {
-        const intType = std.meta.Int(.unsigned, 8 * (1 + intLen));
-        if (std.math.maxInt(intType) >= self.table.count()) {
-          try self.base.write(writer, intType);
+        const IntType = std.meta.Int(.unsigned, 8 * (1 + intLen));
+        if (std.math.maxInt(IntType) >= self.table.count()) {
+          try self.base.write(writer, IntType);
           break;
         }
       }

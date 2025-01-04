@@ -14,23 +14,23 @@ pub const KeyEnum = enum(u2) {
   pub fn fromType(comptime K: type) KeyEnum {
     return @field(KeyEnum, @typeName(K));
   }
-
   pub fn Type(comptime K: KeyEnum) type {
-    return std.meta.Int(.unsigned, 8 * (1 + @as(comptime_int, @intFromEnum(K))));
+    return std.meta.Int(.unsigned, 8 * (@as(comptime_int, @intFromEnum(K)) + 1));
   }
 };
+
 pub const ValEnum = enum(u1) {
-  u32 = 0,
-  u64 = 1,
+  u16 = 0,
+  u32 = 1,
 
   pub fn fromType(comptime V: type) ValEnum {
     return @field(ValEnum, @typeName(V));
   }
-
   pub fn Type(comptime K: ValEnum) type {
-    return std.meta.Int(.unsigned, 32 * (1 << @intFromEnum(K)));
+    return std.meta.Int(.unsigned, 16 * (@as(comptime_int, @intFromEnum(K)) + 1));
   }
 };
+
 /// Because standard's builtin has inferred type, therefor cant be in a packed struct
 pub const EndianEnum = enum(u1) {
   little = 0,
@@ -46,6 +46,9 @@ pub const EndianEnum = enum(u1) {
 };
 
 pub const ModelStats = packed struct {
+  /// Actual length of markov model - 2,
+  /// the only use of this is to detect loops during generation
+  len_minus_2: u8,
   /// Size of the `Key` integer
   key: KeyEnum,
   /// Size of the `Val` integer
@@ -53,8 +56,9 @@ pub const ModelStats = packed struct {
   /// Is this file little or big endian (hope that this variable is not affected by endianness)
   endian: EndianEnum,
 
-  pub fn init(comptime keyType: type, comptime valType: type, comptime endianness: std.builtin.Endian) ModelStats {
+  pub fn init(Len: u8, comptime keyType: type, comptime valType: type, comptime endianness: std.builtin.Endian) ModelStats {
     return .{
+      .len_minus_2 = Len - 2, // min length is 2 (not 0) so we sub 2
       // Key must be one of these types
       .key = KeyEnum.fromType(keyType),
       // Val must be one of these types
@@ -79,7 +83,7 @@ pub const ModelStats = packed struct {
 };
 
 test {
-  const stat = ModelStats.init(u8, u32, @import("defaults.zig").Endian);
+  const stat = ModelStats.init(2, u8, u32, @import("defaults.zig").Endian);
   const statBytes = std.mem.asBytes(&stat);
   const back = try ModelStats.fromBytes(statBytes);
 

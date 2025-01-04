@@ -7,5 +7,5 @@ pub const CharKey = u8;
 pub const WordKey = u32;
 
 // The Type used to store the frequency of occurrence
-pub const Val = u32;
+pub const Val = u16;
 
