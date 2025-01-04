@@ -3,7 +3,7 @@ const MarkovBase = @import("common/markov/markovBase.zig");
 const defaults = @import("common/markov/defaults.zig");
 const GenCyclicList = @import("common/markov/cyclicList.zig").GenCyclicList;
 
-pub fn CharMakov(Len: comptime_int) type {
+pub fn CharMakov(Len: usize) type {
   const Base = MarkovBase.GenBase(Len, defaults.CharKey, defaults.Val);
   const CyclicList = GenCyclicList(Len, u8);
 
@@ -49,7 +49,7 @@ pub fn CharMakov(Len: comptime_int) type {
   };
 }
 
-pub fn WordMakov(Len: comptime_int) type {
+pub fn WordMakov(Len: usize) type {
   const Table = std.StringArrayHashMap(u32);
   const CyclicList = GenCyclicList(Len, defaults.WordKey);
   const Base = MarkovBase.GenBase(Len, defaults.WordKey, defaults.Val);
@@ -115,8 +115,8 @@ pub fn WordMakov(Len: comptime_int) type {
     pub fn write(self: *@This(), writer: std.io.AnyWriter) !void {
       if (std.math.maxInt(u64) < self.table.count()) @panic("Table too large!");
 
-      inline for (0..4) |intLen| {
-        const intType = std.meta.Int(.unsigned, 8 * (1 << intLen));
+      inline for (1..4) |intLen| {
+        const intType = std.meta.Int(.unsigned, 8 * (1 + intLen));
         if (std.math.maxInt(intType) >= self.table.count()) {
           try self.base.write(writer, intType);
           break;

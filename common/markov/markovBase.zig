@@ -10,7 +10,7 @@ const defaults = @import("defaults.zig");
 /// The Val type here is used only during model creation
 pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
   // Validate inputs
-  _ = MarkovModelStats.init(Len, Key, Val, defaults.Endian);
+  _ = MarkovModelStats.init(Key, Val, defaults.Endian);
 
   // Done this way so we can easily sort the keys array without copying
   const kvp = struct { k: [Len]Key, v: Val };
@@ -46,7 +46,7 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
     /// `MinKeyType` tells us what is the minimum possible int size needed for key values
     /// `MinKeyType` = `u8` must be used only for char model
     pub fn write(self: *Self, writer: std.io.AnyWriter, comptime MinKeyType: type) !void {
-      try MarkovModelStats.init(Len, MinKeyType, Val, defaults.Endian).flush(writer);
+      try MarkovModelStats.init(MinKeyType, Val, defaults.Endian).flush(writer);
 
       const TableKey = meta.TableKey(MinKeyType, Val);
       const TableVal = meta.TableVal(MinKeyType, Val);

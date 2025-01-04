@@ -8,15 +8,15 @@ pub const Range = struct {
 pub const KeyEnum = enum(u2) {
   u8 = 0,
   u16 = 1,
-  u32 = 2,
-  u64 = 3,
+  u24 = 2,
+  u32 = 3,
 
   pub fn fromType(comptime K: type) KeyEnum {
     return @field(KeyEnum, @typeName(K));
   }
 
   pub fn Type(comptime K: KeyEnum) type {
-    return std.meta.Int(.unsigned, 8 * (1 << @intFromEnum(K)));
+    return std.meta.Int(.unsigned, 8 * (1 + @as(comptime_int, @intFromEnum(K))));
   }
 };
 pub const ValEnum = enum(u1) {
@@ -46,8 +46,6 @@ pub const EndianEnum = enum(u1) {
 };
 
 pub const ModelStats = packed struct {
-  /// The length of the chain
-  modelLen: u4,
   /// Size of the `Key` integer
   key: KeyEnum,
   /// Size of the `Val` integer
@@ -55,10 +53,8 @@ pub const ModelStats = packed struct {
   /// Is this file little or big endian (hope that this variable is not affected by endianness)
   endian: EndianEnum,
 
-  pub fn init(chainLen: u8, comptime keyType: type, comptime valType: type, comptime endianness: std.builtin.Endian) ModelStats {
+  pub fn init(comptime keyType: type, comptime valType: type, comptime endianness: std.builtin.Endian) ModelStats {
     return .{
-      // We assume chain length to be >= 2
-      .modelLen = @intCast(chainLen - 2),
       // Key must be one of these types
       .key = KeyEnum.fromType(keyType),
       // Val must be one of these types
@@ -83,7 +79,7 @@ pub const ModelStats = packed struct {
 };
 
 test {
-  const stat = ModelStats.init(2, u8, u32, @import("defaults.zig").Endian);
+  const stat = ModelStats.init(u8, u32, @import("defaults.zig").Endian);
   const statBytes = std.mem.asBytes(&stat);
   const back = try ModelStats.fromBytes(statBytes);
 

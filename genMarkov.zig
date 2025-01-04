@@ -88,7 +88,7 @@ fn getMarkovGenInterface(comptime init: InitType, data: []const u8, allocator: s
 
   // Has 4 * 2 * 2 = 16 branches
   switch (stats.key) {
-    inline .u8, .u16, .u32, .u64 => |K| {
+    inline .u8, .u16, .u24, .u32 => |K| {
       // K now comptime
       const Key: type = Stats.KeyEnum.Type(K);
       switch (stats.val) {
