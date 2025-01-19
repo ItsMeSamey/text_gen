@@ -2,6 +2,7 @@ const std = @import("std");
 const Stats = @import("common/markov/markovStats.zig");
 const meta = @import("common/markov/meta.zig");
 const GenInterface = @import("genInterface.zig");
+const sort = @import("common/sort.zig");
 
 const CpuEndianness = Stats.EndianEnum.fromEndian(@import("builtin").cpu.arch.endian());
 
@@ -152,7 +153,7 @@ fn getMarkovGenInterface(comptime init: InitType, data: []const u8, allocator: s
 
 fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
   const read = struct {
-    fn read(_: type, slice: anytype, index: usize) std.meta.Elem(@TypeOf(slice)) {
+    fn read(slice: anytype, index: usize) std.meta.Elem(@TypeOf(slice)) {
       var oval = slice[index];
       if (CpuEndianness != Endianness) std.mem.byteSwapAllFields(@TypeOf(oval), &oval);
       return oval;
@@ -177,26 +178,24 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
 
     /// Generate a key, a key may or may not translate to a full word
     fn gen(self: *@This()) Key {
-      const key0 = read(TableKey, self.keys, self.keyIndex);
-      const key1 = read(TableKey, self.keys, self.keyIndex+1);
+      const key0: TableKey = read(self.keys, self.keyIndex);
+      const key1: TableKey = read(self.keys, self.keyIndex+1);
 
-      const target = self.random.intRangeLessThan(Val, 0, read(TableVal, self.vals, key1.value - 1).val);
-      var start: usize = key0.value;
-      var end: usize = key1.value;
-      var mid: usize = undefined;
-
-      while (start < end) {
-        mid = start + (end - start) / 2;
-        const midVal = read(TableVal, self.vals, mid).val;
-
-        if (target > midVal) {
-          start = mid + 1;
-        } else {
-          end = mid;
+      const from, const to = sort.equalRange(key0.value, key1.value,
+        struct {
+          target: usize,
+          vals: []align(1) const TableVal,
+          pub fn compareFn(ctx: @This(), idx: usize) std.math.Order {
+            const v: TableVal = read(ctx.vals, idx);
+            return std.math.order(v.val, ctx.target);
+          }
+        }{
+          .target = self.random.intRangeLessThan(usize, key0.value, key1.value),
+          .vals = self.vals,
         }
-      }
+      );
 
-      const val = read(TableVal, self.vals, start);
+      const val: TableVal = read(self.vals, if (from == to) from else self.random.intRangeLessThan(usize, from, to));
       self.keyIndex = @intCast(key0.next + val.subnext);
 
       return key0.key;
@@ -284,9 +283,7 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
     pub fn gen(self: *@This()) []const u8 {
       if (Key == u8) {
         while (true) {
-          if (self.converter.convert(self.generator.gen())) |retval| {
-            return retval;
-          }
+          if (self.converter.convert(self.generator.gen())) |retval| return retval;
         }
       }
       return self.converter.convert(self.generator.gen());

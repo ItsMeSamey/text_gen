@@ -5,12 +5,10 @@ const GenCyclicList = @import("common/markov/cyclicList.zig").GenCyclicList;
 
 pub fn CharMakov(Len: usize) type {
   const Base = MarkovBase.GenBase(Len, defaults.CharKey, defaults.Val);
-  const CyclicList = GenCyclicList(Len, u8);
 
   return struct {
     /// The base containing the modal
     base: Base,
-    beginningList: CyclicList = .{},
 
     /// Create the instance of `@This()` object
     pub fn init(allocator: std.mem.Allocator) !@This() {
@@ -18,22 +16,18 @@ pub fn CharMakov(Len: usize) type {
     }
 
     /// You can call this multiple times to train with multiple files.
-    /// WARNING: Data must Not be deleted/free'd during for the lifetime of `self`
-    /// `owner` must be null if data is not allocated, or you want to keep ownership of the data.
-    /// `owner` is used to free memory when deinit is called.
+    /// WARNING: Data must Not be deleted/free'd for the lifetime of `self`
     pub fn train(self: *@This(), data: []const u8) !void {
       if (data.len < Len) return error.InsufficientData;
       for (0..data.len-(Len-1)) |i| {
         try self.base.increment(data[i..][0..Len].*);
       }
 
-      for (data.len-Len..data.len) |i| {
-        self.beginningList.push(data[i]);
-      }
-
+      var stiching: [Len-1 + Len-1]u8 = undefined;
+      @memcpy(stiching[0..Len-1], data[data.len-(Len-1)..][0..Len-1]);
+      @memcpy(stiching[Len-1..], data[0..Len-1]);
       for (0..Len-1) |i| {
-        self.beginningList.push(data[i]);
-        try self.base.increment(self.beginningList.getSlice().*);
+        try self.base.increment(stiching[i..][0..Len].*);
       }
     }
 
@@ -60,10 +54,6 @@ pub fn WordMakov(Len: usize) type {
     /// Lookup table for pointer to a specific word
     table: Table,
 
-    /// The cyclic list use for internal stuff
-    cyclicList: CyclicList = .{},
-    beginning: [Len-1]defaults.WordKey = undefined,
-
     /// Create the instance of `@This()` object
     pub fn init(allocator: std.mem.Allocator) !@This() {
       return .{
@@ -76,22 +66,25 @@ pub fn WordMakov(Len: usize) type {
     /// NOTE: **no** references to `data` are stored so it *can* be deleted immediately after this call
     /// If length of words in data is less than the chain length, this function will return error.InsufficientData
     pub fn train(self: *@This(), data: []const u8) !void {
+      var cyclicList: CyclicList = .{};
+
       var iterator = std.mem.tokenizeScalar(u8, data, 0);
       for (0..Len-1) |_| {
         // You MUST ensure that length of words in data is more than the chain length for each function call
-        try self.turn(iterator.next() orelse return error.InsufficientData);
+        try self.turn(iterator.next() orelse return error.InsufficientData, &cyclicList);
       }
 
-      @memcpy(&self.beginning, self.cyclicList.buf[0..Len-1]);
+      var beginning:[Len-1]defaults.WordKey = undefined;
+      @memcpy(&beginning, cyclicList.buf[0..Len-1]);
 
       while (iterator.next()) |key| {
-        try self.turn(key);
-        try self.base.increment(self.cyclicList.getSlice().*);
+        try self.turn(key, &cyclicList);
+        try self.base.increment(cyclicList.getSlice().*);
       }
 
-      for (self.beginning) |val| {
-        self.cyclicList.push(val);
-        try self.base.increment(self.cyclicList.getSlice().*);
+      for (beginning) |val| {
+        cyclicList.push(val);
+        try self.base.increment(cyclicList.getSlice().*);
       }
     }
 
@@ -99,7 +92,7 @@ pub fn WordMakov(Len: usize) type {
     /// If not added before, we add the word to end of `self.array`
     ///   and set `self.table[val]` = index we inserted the word at (in `self.array`)
     /// The index is then used as a unique identifier for that word.
-    fn turn(self: *@This(), val: []const u8) !void {
+    fn turn(self: *@This(), val: []const u8, cyclicList: *CyclicList) !void {
       const result = try self.table.getOrPut(val);
       if (!result.found_existing) {
         const str = try self.table.allocator.alloc(u8, val.len);
@@ -108,7 +101,7 @@ pub fn WordMakov(Len: usize) type {
         result.value_ptr.* = @intCast(self.table.count());
       }
 
-      self.cyclicList.push(result.value_ptr.*);
+      cyclicList.push(result.value_ptr.*);
     }
 
     /// Writes the data to `writer` deinitialize this object

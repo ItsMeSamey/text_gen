@@ -89,8 +89,8 @@ pub fn swapEndianness(ptr: anytype) void {
   if (PtrInfo != .pointer) @compileError("swapEndianness expected pointer type, found `" ++ @typeName(@TypeOf(ptr)) ++ "`");
 
   switch (PtrInfo.pointer.size) {
-    .One => {},
-    .Slice => {
+    .one => {},
+    .slice => {
       for (ptr) |*item| swapEndianness(item);
       return;
     },
