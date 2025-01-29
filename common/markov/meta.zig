@@ -116,7 +116,7 @@ pub fn swapEndianness(ptr: anytype) void {
     },
     .pointer => |ptr_info| {
       switch (ptr_info.size) {
-        .One, .Slice => { return swapEndianness(*ptr); },
+        .one, .slice => { return swapEndianness(*ptr); },
         else => @compileError("swapEndianness unexpected child to pointer type `" ++ @typeName(S) ++ "`"),
       }
     },
