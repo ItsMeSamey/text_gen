@@ -5,6 +5,16 @@ const meta = @import("meta.zig");
 const MarkovModelStats = @import("markovStats.zig").ModelStats;
 const defaults = @import("defaults.zig");
 
+const native_endian = @import("builtin").cpu.arch.endian();
+fn writePackedStruct(writer: std.io.AnyWriter, value: anytype) !void {
+  var copy = value;
+  if (native_endian != defaults.Endian) std.mem.byteSwapAllFields(@TypeOf(copy), &copy);
+
+  const size = (@bitSizeOf(@TypeOf(copy)) + 7) >> 3;
+  const bytes = std.mem.asBytes(&copy)[0..size];
+  return try writer.writeAll(bytes);
+}
+
 /// A base onject to store the frequency of occurrence a sequence
 /// if `Key` is u8, assumes a char model
 /// The Val type here is used only during model creation
@@ -106,15 +116,15 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
         }
 
         entry.next = mid;
-        try writer.writeStructEndian(TableKey{
+        try writePackedStruct(writer, TableKey{
           .key = @intCast(entry.key[0]),
           .value = @intCast(entry.from),
           .next = mid,
-        }, defaults.Endian);
+        });
       }
 
       // The last (extra) key to make computation easier, see genMarkov.zig's GetMarkovGen.Generator.gen
-      try writer.writeStructEndian(TableKey{
+      try writePackedStruct(writer, TableKey{
         .key = std.math.maxInt(MinKeyType), // this is never used so it may be undefined, but that triggers ub protection
         .value = @intCast(fullList.len),
         .next = 0,
@@ -154,7 +164,7 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
         }
 
         val += item.v;
-        try writer.writeStructEndian(TableVal{
+        try writePackedStruct(writer, TableVal{
           .val = val,
           .subnext = @intCast(mid - list.items[index].next),
         }, defaults.Endian);
