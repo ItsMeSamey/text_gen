@@ -153,8 +153,12 @@ fn getMarkovGenInterface(comptime init: InitType, data: []const u8, allocator: s
 
 fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
   const read = struct {
-    fn read(slice: anytype, index: usize) std.meta.Elem(@TypeOf(slice)) {
-      var oval = slice[index];
+    fn read(comptime T: type, slice: []u8, index: usize) T {
+      const size = (@bitSizeOf(T) + 7) >> 3;
+      const oval_bits = slice[index*size..][0..size];
+      var oval: T = undefined;
+      @memcpy(std.mem.asBytes(&oval)[0..size], oval_bits);
+      @memset(std.mem.asBytes(&oval)[size..], 0);
       if (CpuEndianness != Endianness) std.mem.byteSwapAllFields(@TypeOf(oval), &oval);
       return oval;
     }
@@ -166,9 +170,9 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
   // key generator
   const Generator = struct {
     /// table of keys
-    keys: []align(1) const TableKey,
+    keys: []u8,
     /// table of values to the keys
-    vals: []align(1) const TableVal,
+    vals: []u8,
 
     /// index in the keys table
     keyIndex: usize,
@@ -178,15 +182,15 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
 
     /// Generate a key, a key may or may not translate to a full word
     fn gen(self: *@This()) Key {
-      const key0: TableKey = read(self.keys, self.keyIndex);
-      const key1: TableKey = read(self.keys, self.keyIndex+1);
+      const key0 = read(TableKey, self.keys, self.keyIndex);
+      const key1 = read(TableKey, self.keys, self.keyIndex+1);
 
       const from, const to = sort.equalRange(key0.value, key1.value,
         struct {
           target: usize,
           vals: []align(1) const TableVal,
           pub fn compareFn(ctx: @This(), idx: usize) std.math.Order {
-            const v: TableVal = read(ctx.vals, idx);
+            const v = read(TableVal, ctx.vals, idx);
             return std.math.order(v.val, ctx.target);
           }
         }{
@@ -195,7 +199,7 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
         }
       );
 
-      const val: TableVal = read(self.vals, if (from == to) from else self.random.intRangeLessThan(usize, from, to));
+      const val = read(TableVal, self.vals, if (from == to) from else self.random.intRangeLessThan(usize, from, to));
       self.keyIndex = @intCast(key0.next + val.subnext);
 
       return key0.key;
