@@ -1,24 +1,5 @@
 const std = @import("std");
 
-pub const WordGenerator = struct {
-  ptr: *anyopaque,
-  _gen: *const fn (*anyopaque) []const u8,
-  _roll: *const fn (*anyopaque) void,
-  _free: *const fn (*anyopaque) void,
-
-  pub fn gen(self: @This()) []const u8 {
-    return self._gen(self.ptr);
-  }
-
-  pub fn roll(self: @This()) void {
-    self._roll(self.ptr);
-  }
-
-  pub fn free(self: @This()) void {
-    self._free(self.ptr);
-  }
-};
-
 pub fn GetConverter(T: type, _gen: fn(*T) []const u8, _roll: ?fn(*T) void, _free: ?fn(*T) void) type {
   return struct {
     pub fn gen(ptr: *anyopaque) []const u8 {
@@ -26,23 +7,42 @@ pub fn GetConverter(T: type, _gen: fn(*T) []const u8, _roll: ?fn(*T) void, _free
     }
 
     pub fn roll(ptr: *anyopaque) void {
-      if (_roll) |rollFn| rollFn(@ptrCast(@alignCast(ptr)));
+      _roll.?(@ptrCast(@alignCast(ptr)));
     }
 
     pub fn free(ptr: *anyopaque) void {
-      if (_free) |freeFn| freeFn(@ptrCast(@alignCast(ptr)));
+      _free.?(@ptrCast(@alignCast(ptr)));
     }
 
     pub fn any(ptr: *T) WordGenerator {
       return .{
         .ptr = @ptrCast(ptr),
         ._gen =  gen,
-        ._roll = roll,
-        ._free = free,
+        ._roll = if (_roll) roll else null,
+        ._free = if (_free) free else null,
       };
     }
   };
 }
+
+pub const WordGenerator = struct {
+  ptr: *anyopaque,
+  _gen: *const fn (*anyopaque) []const u8,
+  _roll: ?*const fn (*anyopaque) void,
+  _free: ?*const fn (*anyopaque) void,
+
+  pub fn gen(self: @This()) []const u8 {
+    return self._gen(self.ptr);
+  }
+
+  pub fn roll(self: @This()) void {
+    if (self._roll) |rollFn| rollFn(self.ptr);
+  }
+
+  pub fn free(self: @This()) void {
+    if (self._free) |freeFn| freeFn(self.ptr);
+  }
+};
 
 pub fn autoConvert(ptr: anytype) WordGenerator {
   const T = std.meta.Child(@TypeOf(ptr));
