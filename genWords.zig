@@ -88,8 +88,12 @@ pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
     const GenInterface = @import("genInterface.zig");
     /// You must keep the original struct alive (and not move it)) for the returned `WordGenerator` to be valid
     /// Similar to rust's Pin<>
-    pub fn any(self: *@This()) GenInterface.WordGenerator {
-      return GenInterface.autoConvert(self);
+    pub fn any(self: *@This()) AnyWordGen {
+      const Converter = struct {
+        pub fn _gen(ptr: *anyopaque) []const u8 { return gen(@ptrCast(@alignCast(ptr))); }
+      };
+
+      return AnyWordGen{.ptr = @ptrCast(self), ._gen = Converter._gen};
     }
   };
 }
@@ -104,4 +108,11 @@ test GetWordGen {
   for (0..1024) |_|{ std.debug.print("{s} ", .{generator.gen()}); }
   std.debug.print("\n", .{});
 }
+
+pub const AnyWordGen = struct {
+  ptr: *anyopaque,
+  _gen: *const fn (*anyopaque) []const u8,
+
+  pub fn gen(self: @This()) []const u8 { return self._gen(self.ptr); }
+};
 
