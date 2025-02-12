@@ -128,10 +128,10 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
         .key = std.math.maxInt(MinKeyType), // this is never used so it may be undefined, but that triggers ub protection
         .value = @intCast(fullList.len),
         .next = 0,
-      }, defaults.Endian);
+      });
 
       // Write keys length (+1 for the extra entry at the end)
-      try writer.writeInt(u64, (list.items.len + 1) * @sizeOf(TableKey), defaults.Endian);
+      try writer.writeInt(u64, (list.items.len + 1) * ((@bitSizeOf(TableKey) + 7) >> 3), defaults.Endian);
 
       // Write values
       var index: u32 = 0;
@@ -167,10 +167,10 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
         try writePackedStruct(writer, TableVal{
           .val = val,
           .subnext = @intCast(mid - list.items[index].next),
-        }, defaults.Endian);
+        });
       }
 
-      try writer.writeInt(u64, (fullList.len) * @sizeOf(TableVal), defaults.Endian);
+      try writer.writeInt(u64, (fullList.len) * ((@bitSizeOf(TableVal) + 7) >> 3), defaults.Endian);
     }
 
     pub fn deinit(self: *Self) void {

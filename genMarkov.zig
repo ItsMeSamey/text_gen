@@ -1,7 +1,6 @@
 const std = @import("std");
 const Stats = @import("common/markov/markovStats.zig");
 const meta = @import("common/markov/meta.zig");
-const GenInterface = @import("genInterface.zig");
 const sort = @import("common/sort.zig");
 
 const CpuEndianness = Stats.EndianEnum.fromEndian(@import("builtin").cpu.arch.endian());
@@ -54,21 +53,34 @@ fn getOffsetsFromData(stats: Stats.ModelStats, data: []const u8) !Offsets {
   return retval;
 }
 
+const AnyMarkovGen = struct {
+  ptr: *anyopaque,
+  _gen: *const fn (*anyopaque) []const u8,
+  _roll: *const fn (*anyopaque) void,
+  _free: *const fn (*anyopaque) void,
+  _state: *const fn (*anyopaque) usize,
+
+  fn gen(self: *const @This()) []const u8 { return self._gen(self.ptr); }
+  fn roll(self: *const @This()) void { self._roll(self.ptr); }
+  fn free(self: *const @This()) void { self._free(self.ptr); }
+  fn state(self: *const @This()) usize { return self._state(self.ptr); }
+};
+
 /// Has no runtiume cost when endianness does not match as it mutates data to change the endianness in place
 /// Mutates the header too to reflect the change
-pub fn initMutable(data: []u8, allocator: std.mem.Allocator) !GenInterface.WordGenerator {
+pub fn initMutable(data: []u8, allocator: std.mem.Allocator) !AnyMarkovGen {
   return getMarkovGenInterface(.mutable, data, allocator);
 }
 
 /// If endianness is not the same as native, this will copy the data, data is freed on call to free
 /// This allocates slightly less memory than the size of the whole data, but in case of a word model
 ///   it copies a lot less (specifically does not copy the conversion table)
-pub fn initImmutableCopyable(data: []const u8, allocator: std.mem.Allocator) !GenInterface.WordGenerator {
+pub fn initImmutableCopyable(data: []const u8, allocator: std.mem.Allocator) !AnyMarkovGen {
   return getMarkovGenInterface(.immutable_copyable, data, allocator);
 }
 
 /// This may have runtime cost of interchanging endianness if a model with inappropriate endianness is loaded
-pub fn initImmutableUncopyable(data: []const u8, allocator: std.mem.Allocator) !GenInterface.WordGenerator {
+pub fn initImmutableUncopyable(data: []const u8, allocator: std.mem.Allocator) !AnyMarkovGen {
   return getMarkovGenInterface(.immutable_uncopyable, data, allocator);
 }
 
@@ -78,7 +90,7 @@ const InitType = enum {
   immutable_uncopyable,
 };
 
-fn getMarkovGenInterface(comptime init: InitType, data: []const u8, allocator: std.mem.Allocator) !GenInterface.WordGenerator {
+fn getMarkovGenInterface(comptime init: InitType, data: []const u8, allocator: std.mem.Allocator) !AnyMarkovGen {
   const stats = try Stats.ModelStats.fromBytes(data);
   const offsets = try getOffsetsFromData(stats, data);
 
@@ -99,8 +111,8 @@ fn getMarkovGenInterface(comptime init: InitType, data: []const u8, allocator: s
           const TableKey = meta.TableKey(Key, Val);
           const TableVal = meta.TableVal(Key, Val);
 
-          std.debug.assert(@rem(keys.len, @sizeOf(TableKey)) == 0);
-          std.debug.assert(@rem(vals.len, @sizeOf(TableVal)) == 0);
+          std.debug.assert(@rem(keys.len, (@bitSizeOf(TableKey) + 7) >> 3) == 0);
+          std.debug.assert(@rem(vals.len, (@bitSizeOf(TableVal) + 7) >> 3) == 0);
 
           switch (stats.endian) {
             inline .little, .big => |Endianness| {
@@ -153,7 +165,7 @@ fn getMarkovGenInterface(comptime init: InitType, data: []const u8, allocator: s
 
 fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
   const read = struct {
-    fn read(comptime T: type, slice: []u8, index: usize) T {
+    fn read(comptime T: type, slice: []const u8, index: usize) T {
       const size = (@bitSizeOf(T) + 7) >> 3;
       const oval_bits = slice[index*size..][0..size];
       var oval: T = undefined;
@@ -170,9 +182,9 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
   // key generator
   const Generator = struct {
     /// table of keys
-    keys: []u8,
+    keys: []const u8,
     /// table of values to the keys
-    vals: []u8,
+    vals: []const u8,
 
     /// index in the keys table
     keyIndex: usize,
@@ -188,7 +200,7 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
       const from, const to = sort.equalRange(key0.value, key1.value,
         struct {
           target: usize,
-          vals: []align(1) const TableVal,
+          vals: []const u8,
           pub fn compareFn(ctx: @This(), idx: usize) std.math.Order {
             const v = read(TableVal, ctx.vals, idx);
             return std.math.order(v.val, ctx.target);
@@ -266,8 +278,8 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
     fn initFragments(self: *@This(), keys: []const u8, vals: []const u8, convTable: ?[]const u8, allocator: std.mem.Allocator, freeableSliceSize: usize) !void {
       self.* = .{
         .generator = .{
-          .keys = std.mem.bytesAsSlice(TableKey, keys),
-          .vals = std.mem.bytesAsSlice(TableVal, vals),
+          .keys = keys,
+          .vals = vals,
           .keyIndex = 0,
           .random = @import("common/rng.zig").getRandom(),
         },
@@ -307,8 +319,22 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
       @call(std.builtin.CallModifier.auto, std.mem.Allocator.free, .{self.allocator, memory[0..self.freeableSliceSize]});
     }
 
-    pub fn any(self: *@This()) GenInterface.WordGenerator {
-      return GenInterface.autoConvert(self);
+    pub fn any(self: *@This()) AnyMarkovGen {
+      const Self = @This();
+      const Adapter = struct {
+        pub fn _gen(ptr: *anyopaque) []const u8 { return gen(@ptrCast(@alignCast(ptr))); }
+        pub fn _roll(ptr: *anyopaque) void { return roll(@ptrCast(@alignCast(ptr))); }
+        pub fn _free(ptr: *anyopaque) void { return free(@ptrCast(@alignCast(ptr))); }
+        pub fn _state(ptr: *anyopaque) usize { return @as(*Self, @ptrCast(@alignCast(ptr))).generator.keyIndex; }
+      };
+
+      return .{
+        .ptr = @ptrCast(self),
+        ._gen = Adapter._gen,
+        ._roll = Adapter._roll,
+        ._free = Adapter._free,
+        ._state = Adapter._state,
+      };
     }
   };
 }
