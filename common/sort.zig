@@ -1,7 +1,5 @@
 /// functions from std.sort but generalized
 
-const std = @import("std");
-
 pub fn partitionPoint(from: usize, to: usize, context: anytype) usize {
   var low: usize = from;
   var high: usize = to;
