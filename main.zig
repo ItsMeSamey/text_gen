@@ -66,6 +66,10 @@ fn filterAllowed(str: []u8) []u8 {
   return str[0..idx];
 }
 
+pub fn bufferedWriter(underlying_stream: anytype) std.io.BufferedWriter(1 << 20, @TypeOf(underlying_stream)) {
+  return .{ .unbuffered_writer = underlying_stream };
+}
+
 pub fn main() !void {
   var gpa = std.heap.GeneralPurposeAllocator(.{}){};
   defer _ = gpa.deinit();
@@ -94,7 +98,7 @@ pub fn main() !void {
     var markov_file = try data_dir.createFile("markov.word", .{});
     defer markov_file.close();
 
-    var buffered = std.io.bufferedWriter(markov_file.writer().any());
+    var buffered = bufferedWriter(markov_file.writer().any());
     timer.reset();
     try makov.write(buffered.writer().any());
     try buffered.flush();
@@ -111,7 +115,7 @@ pub fn main() !void {
     var markov_file = try data_dir.createFile("markov.char", .{});
     defer markov_file.close();
 
-    var buffered = std.io.bufferedWriter(markov_file.writer().any());
+    var buffered = bufferedWriter(markov_file.writer().any());
     timer.reset();
     try makov.write(buffered.writer().any());
     try buffered.flush();
