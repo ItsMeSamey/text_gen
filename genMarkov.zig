@@ -53,7 +53,7 @@ fn getOffsetsFromData(stats: Stats.ModelStats, data: []const u8) !Offsets {
   return retval;
 }
 
-const AnyMarkovGen = struct {
+pub const AnyMarkovGen = struct {
   ptr: *anyopaque,
   _gen: *const fn (*anyopaque) []const u8,
   _roll: *const fn (*anyopaque) void,
