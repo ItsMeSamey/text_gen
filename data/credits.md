@@ -20,5 +20,7 @@ following are downloaded from https://gutenberg.org
 `poems_of_love_by_ella_wheeler_wilcox.txt`
 `poems_of_life_by_ella_wheeler_wilcox.txt`
 
-`words.txt` belongs to https://github.com/dwyl/english-words
+[`words.txt`](https://github.com/dwyl/english-words/blob/master/words.txt) belongs to https://github.com/dwyl/english-words
+
+[`sentences.txt`](https://github.com/divaamahajan/K-Most-Popular-Words/blob/main/small_50MB_dataset.txt) is taken from https://github.com/divaamahajan/K-Most-Popular-Words 
 
