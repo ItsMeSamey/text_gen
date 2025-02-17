@@ -1,6 +1,6 @@
 test { std.testing.refAllDeclsRecursive(@This()); }
 const std = @import("std");
-const OptionalStruct = @import("common/word/meta.zig").OptionalStruct;
+const OptionalStruct = @import("common/meta.zig").OptionalStruct;
 
 const RNG = @import("common/rng.zig");
 
@@ -16,13 +16,18 @@ pub const ComptimeOptions = struct {
   /// If you never need to use the default wordGenerator, set this to empty string,
   /// this prevents inclusion of useless data
   defaultData: []const u8 = @embedFile("./data/words.txt"),
+
+  /// The saperator to use to split the words in the data file
+  saperator: u8 = '\n'
 };
 
-pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
+pub fn GetRandomGen(comptimeOptions: ComptimeOptions, State: type, Interface: type) type {
   return struct {
     at: RandomIntType = 0,
     /// index for last random word generated
     options: Options,
+    /// this is the state of the generator
+    state: State = .{},
 
     /// Options passed to the init function
     pub const Options = struct {
@@ -69,7 +74,7 @@ pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
     /// Return a random word from `self.data`.
     pub fn gen(self: *@This()) []const u8 {
       self.at = comptimeOptions.rngFn(self.options.random, self.at, @truncate(self.options.data.len));
-      self.at = if (std.mem.indexOfScalarPos(u8, self.options.data, self.at, '\x00')) |idx| @truncate(idx + 1) else 0;
+      self.at = if (std.mem.indexOfScalarPos(u8, self.options.data, self.at, comptimeOptions.saperator)) |idx| @truncate(idx + 1) else 0;
 
       // Return the next word, not the one we are currently inside. This is "more" random (I think!).
       return self.next();
@@ -80,21 +85,32 @@ pub fn GetWordGen(comptime comptimeOptions: ComptimeOptions) type {
     /// NOTE: This is deterministic and thus NOT random
     pub fn next(self: *@This()) []const u8 {
       const start = self.at;
-      const end = std.mem.indexOfScalarPos(u8, self.options.data, self.at, '\x00') orelse self.options.data.len;
+      const end = std.mem.indexOfScalarPos(u8, self.options.data, self.at, comptimeOptions.saperator) orelse self.options.data.len;
       defer self.at = if (end + 1 < self.options.data.len) @truncate(end + 1) else 0;
       return self.options.data[start..end];
     }
 
     /// You must keep the original struct alive (and not move it)) for the returned `WordGenerator` to be valid
     /// Similar to rust's Pin<>
-    pub fn any(self: *@This()) AnyWordGen {
+    pub fn any(self: *@This()) Interface {
       const Adapter = struct {
         pub fn _gen(ptr: *anyopaque) []const u8 { return gen(@ptrCast(@alignCast(ptr))); }
       };
 
-      return AnyWordGen{.ptr = @ptrCast(self), ._gen = Adapter._gen};
+      return Interface{.ptr = @ptrCast(self), ._gen = Adapter._gen};
     }
   };
+}
+
+pub const AnyWordGen = struct {
+  ptr: *anyopaque,
+  _gen: *const fn (*anyopaque) []const u8,
+
+  pub fn gen(self: @This()) []const u8 { return self._gen(self.ptr); }
+};
+
+pub fn GetWordGen(comptimeOptions: ComptimeOptions) type {
+  return GetRandomGen(comptimeOptions, struct{}, AnyWordGen);
 }
 
 test GetWordGen {
@@ -107,11 +123,4 @@ test GetWordGen {
   for (0..1024) |_|{ std.debug.print("{s} ", .{generator.gen()}); }
   std.debug.print("\n", .{});
 }
-
-pub const AnyWordGen = struct {
-  ptr: *anyopaque,
-  _gen: *const fn (*anyopaque) []const u8,
-
-  pub fn gen(self: @This()) []const u8 { return self._gen(self.ptr); }
-};
 
