@@ -1,8 +1,12 @@
-Random word generation with
-- random selection
-- markov chains 
+Random word text using
+1. Random Selection
+    - of words
+    - of sentences
+2. Markov Chains 
+    - using characters
+    - using words
 
-in ___Zig___
+in *__Zig__*
 
-see [credits](data/credits.md)
+see [credits](src/data/credits.md)
 
