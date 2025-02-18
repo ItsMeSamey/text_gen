@@ -114,14 +114,18 @@ pub fn GetWordGen(comptimeOptions: ComptimeOptions) type {
   return GetRandomGen(comptimeOptions, struct{}, AnyWordGen);
 }
 
-test GetWordGen {
-  std.testing.refAllDeclsRecursive(GetWordGen(.{}));
-  std.testing.refAllDeclsRecursive(ComptimeOptions);
-  
-  var generator = GetWordGen(.{}).init(.{});
 
-  std.debug.print("TEST (GenWordGen):\n\tWORDS: ", .{});
-  for (0..1024) |_|{ std.debug.print("{s} ", .{generator.gen()}); }
-  std.debug.print("\n", .{});
+fn testGenerator(comptime file_name: []const u8, comptime delimiter: []const u8) void {
+  const Generator = GetWordGen(.{.defaultData = @embedFile(file_name)});
+  std.debug.print("TEST ({s}):\n\tOUTPUT: ", .{file_name});
+  var generator = Generator.init(.{});
+  for (0..16) |_|{ std.debug.print("{s}{s}", .{generator.gen(), delimiter}); }
+}
+test GetWordGen {
+  testGenerator("./data/sentences.txt", "\n\n");
+  std.debug.print("\n\n", .{});
+  testGenerator("./data/words_non_alpha.txt", " ");
+  std.debug.print("\n\n", .{});
+  testGenerator("./data/words.txt", " ");
 }
 
