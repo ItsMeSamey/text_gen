@@ -256,37 +256,43 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
       const key0 = read(TableKey, self.keys[0..self.key_len], self.state.index);
       const key1 = read(TableKey, self.keys[0..self.key_len], self.state.index+1);
 
-      // var index = key0.value;
-      //   std.debug.print("\nDATA:{any}\n", .{key0});
-      // while (index < key1.value): (index += (@bitSizeOf(TableVal) + 7) >> 3) {
-      //   const val = read(TableVal, self.vals[0..self.val_len], index);
-      //   std.debug.print("({any}): {any}\n", .{val, read(TableKey, self.keys[0..self.key_len], key0.next + val.subnext)});
-      // }
-      // std.debug.print("\n", .{});
+      var index = key0.value;
+        std.debug.print("\nDATA:{any}\n", .{key0});
+      while (index < key1.value): (index += (@bitSizeOf(TableVal) + 7) >> 3) {
+        const val = read(TableVal, self.vals[0..self.val_len], index);
+        std.debug.print("({any}): {any}\n", .{val, read(TableKey, self.keys[0..self.key_len], key0.next + val.subnext)});
+      }
+      std.debug.print("\n", .{});
 
-      const from, const to = @import("common/markov/sort.zig").equalRange(key0.value, key1.value,
-        struct {
-          target: usize,
-          vals: []const u8,
-          pub fn compareFn(ctx: @This(), idx: usize) std.math.Order {
-            const v = read(TableVal, ctx.vals, idx);
-            return std.math.order(v.val, ctx.target);
-          }
-        }{
-          .target = self.state.random.intRangeLessThan(usize, 0, read(TableVal, self.vals[0..self.val_len], key1.value-1).val),
-          .vals = self.vals[0..self.val_len],
+      const last_val = read(TableVal, self.vals[0..self.val_len], key1.value-1).val;
+      const ctx = struct {
+        target: usize,
+        vals: []const u8,
+        pub fn compareFn(ctx: @This(), idx: usize) std.math.Order {
+          const v = read(TableVal, ctx.vals, idx);
+          return std.math.order(v.val, ctx.target);
         }
-      );
+      }{
+        .target = self.state.random.intRangeLessThan(usize, 0, last_val),
+        .vals = self.vals[0..self.val_len],
+      };
+      const from, const to = @import("common/markov/sort.zig").equalRange(key0.value, key1.value, ctx);
 
-      const val = read(TableVal, self.vals[0..self.val_len], if (from == to) @intCast(from)
-        else self.state.random.intRangeLessThan(@TypeOf(self.state.index), @intCast(from), @intCast(to)));
-      self.state.index = @intCast(key0.next + val.subnext);
+      const idx: u32 = blk: {
+        if (from == to) {
+          break :blk @intCast(if (from == key1.value) from - 1 else from);
+        }
+        break :blk self.state.random.intRangeLessThan(u32, @intCast(from), @intCast(to));
+      };
+
+      const val = read(TableVal, self.vals[0..self.val_len], idx);
+      self.state.index = key0.next + val.subnext;
 
       return key0.key;
     }
 
     pub fn roll(self: *@This()) void {
-      self.state.index = self.state.random.intRangeLessThan(@TypeOf(self.state.index), 0, @divExact(self.key_len, ((@bitSizeOf(TableKey) + 7) >> 3)));
+      self.state.index = self.state.random.intRangeLessThan(u32, 0, @divExact(self.key_len, ((@bitSizeOf(TableKey) + 7) >> 3)));
     }
   };
 

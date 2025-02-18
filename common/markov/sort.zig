@@ -45,6 +45,27 @@ pub fn upperBound(from: usize, to: usize, context: anytype) usize {
   });
 }
 
+/// Returns a tuple of the lower and upper indices in `items` between which all
+/// elements return `.eq` when given to `compareFn`.
+/// - If no element in `items` returns `.eq`, both indices are the
+/// index of the first element in `items` returning `.gt`.
+/// - If no element in `items` returns `.gt`, both indices equal `items.len`.
+///
+/// `items` must be sorted in ascending order with respect to `compareFn`:
+/// ```
+/// [0]                                                   [len]
+/// ┌───┬───┬─/ /─┬───┬───┬───┬─/ /─┬───┬───┬───┬─/ /─┬───┐
+/// │.lt│.lt│ \ \ │.lt│.eq│.eq│ \ \ │.eq│.gt│.gt│ \ \ │.gt│
+/// └───┴───┴─/ /─┴───┴───┴───┴─/ /─┴───┴───┴───┴─/ /─┴───┘
+/// ├─────────────────┼─────────────────┼─────────────────┤
+///  ↳ zero or more    ↳ zero or more    ↳ zero or more
+///                   ├─────────────────┤
+///                    ↳ returned range
+/// ```
+///
+/// `O(log n)` time complexity.
+///
+/// See also: `lowerBound, `upperBound`, `partitionPoint`.
 pub fn equalRange(from: usize, to: usize, context: anytype) struct { usize, usize } {
   var low: usize = from;
   var high: usize = to;
