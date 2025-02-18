@@ -18,13 +18,13 @@ pub const AnyMarkovGen = struct {
   pub const Vtable = struct {
     gen: *const fn (*anyopaque) []const u8,
     roll: *const fn (*anyopaque) void,
-    free: *const fn (*anyopaque) void,
+    free: *const fn (*anyopaque, allocator: std.mem.Allocator) void,
     state: *const fn (*anyopaque) *StateStruct
   };
 
   fn gen(self: *@This()) []const u8 { return self.vtable.gen(@ptrCast(@alignCast(&self.data))); }
   fn roll(self: *@This()) void { self.vtable.roll(@ptrCast(@alignCast(&self.data))); }
-  fn free(self: *@This()) void { self.vtable.free(@ptrCast(@alignCast(&self.data))); }
+  fn free(self: *@This(), allocator: std.mem.Allocator) void { self.vtable.free(@ptrCast(@alignCast(&self.data)), allocator); }
   fn state(self: *@This()) *StateStruct { return self.vtable.state(@ptrCast(@alignCast(&self.data))); }
 };
 
@@ -35,9 +35,9 @@ fn statsWithSameEndianness(data: []const u8) Stats {
 }
 
 fn readOne(comptime T: type, Endianness: Stats.EndianEnum, data: []const u8, offset: usize) T {
-  var retval: T = @bitCast(data[offset..][0..@sizeOf(T)].*);
-  if (CpuEndianness != Endianness) meta.swapEndianness(&retval);
-  return retval;
+  var retval: [1]T = .{@bitCast(data[offset..][0..@sizeOf(T)].*)};
+  if (CpuEndianness != Endianness) std.mem.byteSwapAllFields([1]T, &retval);
+  return retval[0];
 }
 
 const Offsets = struct {
@@ -77,30 +77,56 @@ fn getOffsetsFromData(stats: Stats.ModelStats, data: []const u8) !Offsets {
 }
 
 pub const InitOptions = struct {
-  /// NOTE: This is used in chat model only, ignored for word model
-  /// If a word exceeds this length, it will be clipped
-  max_char_length: u32 = 256,
+  /// The allocator to use for internal allocations
+  /// This same allocatior needs to be provided when calling `AnyMarkovGen.free()`
+  allocator: std.mem.Allocator,
 
   /// The random device to be used for text generation
   random: std.Random,
+
+  /// The allocation that should be freed by the allocator on object cleanup (the file you read from disk)
+  /// Can only be set in call to mutable, otherwise initialization will PANIC!
+  /// NOTE: if length of this field is 0, the allocation will not be freed (even if you set this manually)
+  allocation: []const u8 = blk: {
+    var val: []const u8 = undefined;
+    val.ptr = @ptrFromInt(1);
+    val.len = 0;
+    break :blk val;
+  },
+
+  /// NOTE: This is used in chat model only, ignored for word model
+  /// If a word exceeds this length, it will be clipped
+  max_char_length: u32 = 256,
 };
 
 /// Has no runtiume cost when endianness does not match as it mutates data to change the endianness in place
 /// Mutates the header too to reflect the change
-pub fn initMutable(data: []u8, allocator: std.mem.Allocator, options: InitOptions) !AnyMarkovGen {
-  return getMarkovGenInterface(.mutable, data, allocator);
+pub fn initMutable(data: []u8, options: InitOptions) !AnyMarkovGen {
+  return getMarkovGenInterface(.mutable, data, options);
 }
 
+
+/// NOTE: I have not seen any valid use case of immutable_copyable, it's probably a sign of a deeper problem, use `initMutable` or `initImmutableUncopyable` instead
 /// If endianness is not the same as native, this will copy the data, data is freed on call to free
 /// This allocates slightly less memory than the size of the whole data, but in case of a word model
 ///   it copies a lot less (specifically does not copy the conversion table)
-pub fn initImmutableCopyable(data: []const u8, allocator: std.mem.Allocator, options: InitOptions) !AnyMarkovGen {
-  return getMarkovGenInterface(.immutable_copyable, data, allocator);
+pub fn initImmutableCopyable(data: []const u8, options: InitOptions) !AnyMarkovGen {
+  if (@inComptime()) {
+    if (options.allocation.len != 0) @compileError("Cannot set options.allocation in call to initImmutableCopyable()");
+  } else {
+    if (options.allocation.len != 0) @panic("Cannot set options.allocation in call to initImmutableCopyable()");
+  }
+  return getMarkovGenInterface(.immutable_copyable, data, options);
 }
 
 /// This may have runtime cost of interchanging endianness if a model with opposite endianness is loaded
-pub fn initImmutableUncopyable(data: []const u8, allocator: std.mem.Allocator, options: InitOptions) !AnyMarkovGen {
-  return getMarkovGenInterface(.immutable_uncopyable, data, allocator);
+pub fn initImmutableUncopyable(data: []const u8, options: InitOptions) !AnyMarkovGen {
+  if (@inComptime()) {
+    if (options.allocation.len != 0) @compileError("Cannot set options.allocation in call to initImmutableUncopyable()");
+  } else {
+    if (options.allocation.len != 0) @panic("Cannot set options.allocation in call to initImmutableUncopyable()");
+  }
+  return getMarkovGenInterface(.immutable_uncopyable, data, options);
 }
 
 /// Read the packed struct from an packed array of structs
@@ -119,12 +145,13 @@ const InitType = enum {
   immutable_uncopyable,
 };
 
-fn getMarkovGenInterface(comptime init: InitType, data: []const u8, allocator: std.mem.Allocator, options: InitOptions) !AnyMarkovGen {
+fn getMarkovGenInterface(comptime init: InitType, data: []const u8, immutable_options: InitOptions) !AnyMarkovGen {
   const stats = try Stats.ModelStats.fromBytes(data);
   const offsets = try getOffsetsFromData(stats, data);
 
-  const keys = data[offsets.keys.start..offsets.keys.end];
-  const vals = data[offsets.vals.start..offsets.vals.end];
+  var keys = data[offsets.keys.start..offsets.keys.end];
+  var vals = data[offsets.vals.start..offsets.vals.end];
+  var options = immutable_options;
 
   const convTable = if (offsets.conversionTable) |convTable| data[convTable.start..convTable.end] else null;
 
@@ -166,33 +193,25 @@ fn getMarkovGenInterface(comptime init: InitType, data: []const u8, allocator: s
 
               // All of the switch cases here are (or atleast are supposed to be) comptime
               const Model = GetMarkovGen(Key, Val, if (Endianness != CpuEndianness and init == .immutable_uncopyable) Endianness else CpuEndianness);
-              const freeableSliceSize = @sizeOf(Model) + (if (Endianness != CpuEndianness and init == .immutable_copyable) keys.len + vals.len else 0);
-              const freeableSlice = try allocator.alignedAlloc(u8, @alignOf(Model), freeableSliceSize);
 
-              var model: *Model = @ptrCast(freeableSlice[0..@sizeOf(Model)].ptr);
-              if (Endianness == CpuEndianness) {
-                try model.initFragments(keys, vals, convTable, allocator, freeableSliceSize);
-              } else {
-                switch (init) {
-                  .mutable => {
-                    const mutableKeys = @constCast(keys);
-                    const mutableVals = @constCast(vals);
-                    swapEndianness(mutableKeys, mutableVals);
-                    try model.initFragments(mutableKeys, mutableVals, convTable, allocator, freeableSliceSize);
-                  },
-                  .immutable_copyable => {
-                    const mutableKeys = freeableSlice[@sizeOf(Model)..][0..keys.len];
-                    const mutableVals = mutableKeys.ptr[keys.len..][0..vals.len];
-                    @memcpy(mutableKeys, keys);
-                    @memcpy(mutableVals, vals);
-                    swapEndianness(mutableKeys, mutableVals);
-                    try model.initFragments(mutableKeys, mutableVals, convTable, allocator, freeableSliceSize);
-                  },
-                  .immutable_uncopyable => {
-                    try model.initFragments(keys, vals, convTable, allocator, freeableSliceSize);
-                  },
+              var model: Model = undefined;
+              if (Endianness != CpuEndianness) {
+                if (init == .mutable) {
+                  swapEndianness(@constCast(keys), @constCast(vals));
+                } else if (init == .immutable_copyable) {
+                  const freeableSliceSize = keys.len + vals.len;
+                  const freeableSlice: []u8 = try options.allocator.alloc(u8, freeableSliceSize);
+                  const mutableKeys = freeableSlice[0..keys.len];
+                  const mutableVals = freeableSlice[keys.len..][0..vals.len];
+                  @memcpy(mutableKeys, keys);
+                  @memcpy(mutableVals, vals);
+                  swapEndianness(mutableKeys, mutableVals);
+                  options.allocation = freeableSlice;
+                  keys = mutableKeys;
+                  vals = mutableVals;
                 }
               }
+              try model.initFragments(keys, vals, convTable, options);
 
               return model.any();
             } 
@@ -249,7 +268,8 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
         }
       );
 
-      const val = read(TableVal, self.vals[0..self.val_len], if (from == to) from else self.state.random.intRangeLessThan(@TypeOf(self.state.index), from, to));
+      const val = read(TableVal, self.vals[0..self.val_len], if (from == to) @intCast(from)
+        else self.state.random.intRangeLessThan(@TypeOf(self.state.index), @intCast(from), @intCast(to)));
       self.state.index = @intCast(key0.next + val.subnext);
 
       return key0.key;
@@ -265,9 +285,9 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
     buffer_capacity: u32,
     buffer_at: u32,
 
-    pub fn init(buffer_capacity: u32, allocator: std.mem.Allocator) @This() {
+    pub fn init(buffer_capacity: u32, allocator: std.mem.Allocator) !@This() {
       return .{
-        .buffer = try allocator.alloc(buffer_capacity).ptr,
+        .buffer = (try allocator.alloc(u8, buffer_capacity)).ptr,
         .buffer_capacity = buffer_capacity,
         .buffer_at = 0,
       };
@@ -328,9 +348,8 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
   return struct {
     generator: Generator,
     converter: union{ char: CharConverter, word: WordConverter },
-    allocator: std.mem.Allocator,
 
-    fn initFragments(self: *@This(), keys: []const u8, vals: []const u8, convTable: ?[]const u8, allocator: std.mem.Allocator, options: InitOptions) !void {
+    fn initFragments(self: *@This(), keys: []const u8, vals: []const u8, convTable: ?[]const u8, options: InitOptions) !void {
       self.* = .{
         .generator = .{
           .keys = keys.ptr,
@@ -343,9 +362,9 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
           },
         },
         .converter = if (Key == u8) .{
-          .char = try CharConverter.init(options.max_char_length, allocator),
+          .char = try CharConverter.init(options.max_char_length, options.allocator),
         } else .{
-          .word = try WordConverter.init(convTable.?, allocator),
+          .word = try WordConverter.init(convTable.?, options.allocator),
         },
       };
 
@@ -357,10 +376,10 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
     pub fn gen(self: *@This()) []const u8 {
       if (Key == u8) {
         while (true) {
-          if (self.converter.char(self.allocator, self.generator.gen())) |retval| return retval;
+          if (self.converter.char.convert(self.generator.gen())) |retval| return retval;
         }
       } else {
-        return self.converter.convert(self.generator.gen());
+        return self.converter.word.convert(self.generator.gen());
       }
     }
 
@@ -368,8 +387,8 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
       self.generator.roll();
     }
 
-    pub fn free(self: *@This()) void {
-      if (Key != u8) { self.converter.word.deinit(); }
+    pub fn free(self: *@This(), allocator: std.mem.Allocator) void {
+      if (Key != u8) { self.converter.word.deinit(allocator); }
     }
 
     pub fn state(self: *@This()) *StateStruct {
@@ -381,8 +400,8 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
       const Adapter = struct {
         pub fn gen(ptr: *anyopaque) []const u8 { return Self.gen(@ptrCast(@alignCast(ptr))); }
         pub fn roll(ptr: *anyopaque) void { return Self.roll(@ptrCast(@alignCast(ptr))); }
-        pub fn free(ptr: *anyopaque) void { return Self.free(@ptrCast(@alignCast(ptr))); }
-        pub fn state(ptr: *anyopaque) *usize { return &@as(*Self, @ptrCast(@alignCast(ptr))).generator.state; }
+        pub fn free(ptr: *anyopaque, allocator: std.mem.Allocator) void { return Self.free(@ptrCast(@alignCast(ptr)), allocator); }
+        pub fn state(ptr: *anyopaque) *StateStruct { return &@as(*Self, @ptrCast(@alignCast(ptr))).generator.state; }
         pub fn dupe(ptr: *anyopaque) *usize { return &@as(*Self, @ptrCast(@alignCast(ptr))).generator.state; }
       };
 
@@ -409,10 +428,12 @@ test "char_markov" {
   defer data_dir.close();
 
   const data = try data_dir.readFileAlloc(allocator, "markov.char", std.math.maxInt(usize));
-  defer allocator.free(data);
-
-  var gen = try initMutable(data, allocator);
-  defer gen.free();
+  var gen = try initMutable(data, .{
+    .random = @import("common/rng.zig").getRandom(),
+    .allocator = allocator,
+    .allocation = data
+  });
+  defer gen.free(std.testing.allocator);
 
   std.debug.print("\nChar Markov:", .{});
   for (0..1024) |_| {
@@ -428,10 +449,12 @@ test "word_markov" {
   defer data_dir.close();
 
   const data = try data_dir.readFileAlloc(allocator, "markov.word", std.math.maxInt(usize));
-  defer allocator.free(data);
-
-  var gen = try initMutable(data, allocator);
-  defer gen.free();
+  var gen = try initMutable(data, .{
+    .random = @import("common/rng.zig").getRandom(),
+    .allocator = allocator,
+    .allocation = data
+  });
+  defer gen.free(std.testing.allocator);
 
   std.debug.print("\nWord Markov:", .{});
   for (0..1024) |_| {
