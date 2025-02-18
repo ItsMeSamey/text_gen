@@ -33,7 +33,7 @@ pub fn GetRandomGen(comptimeOptions: ComptimeOptions, State: type, Interface: ty
     pub const Options = struct {
       /// RNG device used for random index generation
       random: std.Random,
-      /// The data for generating words. Must be delimited by '\x00'
+      /// The data for generating words. Must be delimited by 'comptimeOptions.saperator'
       data: []const u8,
 
       fn default() @This() {
@@ -48,14 +48,13 @@ pub fn GetRandomGen(comptimeOptions: ComptimeOptions, State: type, Interface: ty
     pub const OptionalOptions = OptionalStruct(Options);
 
     /// Initialize with given options.
-    /// If the all options are null (i.e. `.{}`), it's better (faster) to use `default()` instead
-    pub fn init(options: OptionalOptions) @This() {
-      if (comptimeOptions.defaultData.len == 0 and options.data == null) {
-        const s = @src();
-        @panic(
-          "function `" ++ s.fn_name ++ "` in file " ++ s.file ++ ":" ++ std.fmt.comptimePrint("{d}", .{s.line}) ++
-          " Default called with zero length default data"
-        );
+    pub fn init(optional_options: ?OptionalOptions) @This() {
+      if (comptimeOptions.defaultData.len == 0 and (optional_options == null or optional_options.?.data == null or optional_options.?.data.?.len == 0)) {
+        // Data was not specified at both runtime and comptime, this does not make any sense
+        const err_str = "data was not specified at both comptime and runtime";
+        if (@inComptime()) @compileError(err_str);
+        const s = @src(); // Fallback info for if stack traces are disabled
+        @panic(std.fmt.comptimePrint("function `{s}` in file `{s}:{d}`\n{s}", .{s.fn_name, s.file, s.line, err_str}));
       }
 
       var retval = @This() {
@@ -63,9 +62,11 @@ pub fn GetRandomGen(comptimeOptions: ComptimeOptions, State: type, Interface: ty
       };
 
       // assign all non null fields to `retval.options`
-      inline for (std.meta.fields(OptionalOptions)) |f| {
-        if (@field(options, f.name) != null) {
-          @field(retval.options, f.name) = @field(options, f.name).?;
+      if (optional_options) |options| {
+        inline for (std.meta.fields(OptionalOptions)) |f| {
+          if (@field(options, f.name) != null) {
+            @field(retval.options, f.name) = @field(options, f.name).?;
+          }
         }
       }
       return retval;
