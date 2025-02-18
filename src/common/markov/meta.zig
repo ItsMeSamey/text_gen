@@ -1,7 +1,8 @@
 const std = @import("std");
 
-pub fn SizedUint(maxCap: comptime_int) type {
-  return std.meta.Int(.unsigned, std.math.log2(maxCap << 1));
+/// Get the minimum integer type that can hold value atleast upto max_cap
+pub fn SizedUint(max_cap: comptime_int) type {
+  return std.meta.Int(.unsigned, std.math.log2(max_cap << 1));
 }
 
 test SizedUint {
@@ -14,6 +15,7 @@ test SizedUint {
   try std.testing.expect(SizedUint(std.math.maxInt(u16) + 1) == u17);
 }
 
+/// Gives the uint type that could hold the given value inside it
 pub fn Uint(len: comptime_int, sliceType: type) type {
   const childSize = @sizeOf(std.meta.Elem(sliceType)) * 8;
   return std.meta.Int(.unsigned, childSize * len);
@@ -59,6 +61,7 @@ pub fn opposite(comptime op: std.math.CompareOperator) std.math.CompareOperator 
   };
 }
 
+/// Table key struct
 pub fn TableKey(Key: type, Val: type) type {
   _ = Val;
   return packed struct {
@@ -71,6 +74,7 @@ pub fn TableKey(Key: type, Val: type) type {
   };
 }
 
+/// Table val struct
 pub fn TableVal(Key: type, Val: type) type {
   return packed struct {
     /// suboffset to the next entry that should be, actual offset to next = Keys.next + Vals.subnext

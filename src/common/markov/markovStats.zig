@@ -1,10 +1,12 @@
 const std = @import("std");
 
+/// Represents a range
 pub const Range = struct {
   start: u64,
   end: u64,
 };
 
+/// Key types enum
 pub const KeyEnum = enum(u2) {
   u8 = 0,
   u16 = 1,
@@ -19,6 +21,7 @@ pub const KeyEnum = enum(u2) {
   }
 };
 
+/// Val type enum
 pub const ValEnum = enum(u1) {
   u16 = 0,
   u32 = 1,
@@ -45,6 +48,7 @@ pub const EndianEnum = enum(u1) {
   }
 };
 
+/// Model Stats struct, used as the file header
 pub const ModelStats = packed struct {
   /// Actual length of markov model - 2,
   /// the only use of this is to detect loops during generation
@@ -56,6 +60,7 @@ pub const ModelStats = packed struct {
   /// Is this file little or big endian (hope that this variable is not affected by endianness)
   endian: EndianEnum,
 
+  /// Init the struct from given types
   pub fn init(Len: u8, comptime keyType: type, comptime valType: type, comptime endianness: std.builtin.Endian) ModelStats {
     return .{
       .len_minus_2 = Len - 2, // min length is 2 (not 0) so we sub 2
