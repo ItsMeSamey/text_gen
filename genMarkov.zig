@@ -12,7 +12,9 @@ pub const StateStruct = struct {
 };
 
 pub const AnyMarkovGen = struct {
-  data: [@sizeOf(GetMarkovGen(u0, u0, CpuEndianness))]u8,
+  const MarkovType = GetMarkovGen(u0, u0, CpuEndianness);
+  /// WARNING: Any operations on this field are unchecked illegal behaviour
+  _data: MarkovType,
   vtable: *const Vtable,
 
   pub const Vtable = struct {
@@ -22,10 +24,10 @@ pub const AnyMarkovGen = struct {
     state: *const fn (*anyopaque) *StateStruct
   };
 
-  fn gen(self: *@This()) []const u8 { return self.vtable.gen(@ptrCast(@alignCast(&self.data))); }
-  fn roll(self: *@This()) void { self.vtable.roll(@ptrCast(@alignCast(&self.data))); }
-  fn free(self: *@This(), allocator: std.mem.Allocator) void { self.vtable.free(@ptrCast(@alignCast(&self.data)), allocator); }
-  fn state(self: *@This()) *StateStruct { return self.vtable.state(@ptrCast(@alignCast(&self.data))); }
+  fn gen(self: *@This()) []const u8 { return self.vtable.gen(@ptrCast(&self._data)); }
+  fn roll(self: *@This()) void { self.vtable.roll(@ptrCast(&self._data)); }
+  fn free(self: *@This(), allocator: std.mem.Allocator) void { self.vtable.free(@ptrCast(&self._data), allocator); }
+  fn state(self: *@This()) *StateStruct { return self.vtable.state(@ptrCast(&self._data)); }
 };
 
 fn statsWithSameEndianness(data: []const u8) Stats {
@@ -348,6 +350,7 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
   return struct {
     generator: Generator,
     converter: union{ char: CharConverter, word: WordConverter },
+    freeable_slice: []const u8,
 
     fn initFragments(self: *@This(), keys: []const u8, vals: []const u8, convTable: ?[]const u8, options: InitOptions) !void {
       self.* = .{
@@ -366,6 +369,7 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
         } else .{
           .word = try WordConverter.init(convTable.?, options.allocator),
         },
+        .freeable_slice = options.allocation,
       };
 
       if (Key == u8) {
@@ -388,14 +392,22 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
     }
 
     pub fn free(self: *@This(), allocator: std.mem.Allocator) void {
-      if (Key != u8) { self.converter.word.deinit(allocator); }
+      if (Key == u8) {
+        self.converter.char.deinit(allocator);
+      } else {
+        self.converter.word.deinit(allocator);
+      }
+
+      if (self.freeable_slice.len != 0) {
+        allocator.free(self.freeable_slice);
+      }
     }
 
     pub fn state(self: *@This()) *StateStruct {
       return &self.generator.state;
     }
 
-    pub fn any(self: *@This()) AnyMarkovGen {
+    pub fn any(self: @This()) AnyMarkovGen {
       const Self = @This();
       const Adapter = struct {
         pub fn gen(ptr: *anyopaque) []const u8 { return Self.gen(@ptrCast(@alignCast(ptr))); }
@@ -406,7 +418,7 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
       };
 
       return .{
-        .data = std.mem.asBytes(self).*,
+        ._data = @as(*const AnyMarkovGen.MarkovType, @ptrCast(&self)).*,
         .vtable = &AnyMarkovGen.Vtable{
           .gen = Adapter.gen,
           .roll = Adapter.roll,
@@ -420,27 +432,6 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
 
 test {
   std.testing.refAllDecls(@This());
-}
-
-test "char_markov" {
-  const allocator = std.testing.allocator;
-  var data_dir = try std.fs.cwd().makeOpenPath("data", .{});
-  defer data_dir.close();
-
-  const data = try data_dir.readFileAlloc(allocator, "markov.char", std.math.maxInt(usize));
-  var gen = try initMutable(data, .{
-    .random = @import("common/rng.zig").getRandom(),
-    .allocator = allocator,
-    .allocation = data
-  });
-  defer gen.free(std.testing.allocator);
-
-  std.debug.print("\nChar Markov:", .{});
-  for (0..1024) |_| {
-    const word = gen.gen();
-    std.debug.print(" {s}", .{word});
-  }
-  std.debug.print("\n", .{});
 }
 
 test "word_markov" {
@@ -457,6 +448,27 @@ test "word_markov" {
   defer gen.free(std.testing.allocator);
 
   std.debug.print("\nWord Markov:", .{});
+  for (0..1024) |_| {
+    const word = gen.gen();
+    std.debug.print(" {s}", .{word});
+  }
+  std.debug.print("\n", .{});
+}
+
+test "char_markov" {
+  const allocator = std.testing.allocator;
+  var data_dir = try std.fs.cwd().makeOpenPath("data", .{});
+  defer data_dir.close();
+
+  const data = try data_dir.readFileAlloc(allocator, "markov.char", std.math.maxInt(usize));
+  var gen = try initMutable(data, .{
+    .random = @import("common/rng.zig").getRandom(),
+    .allocator = allocator,
+    .allocation = data
+  });
+  defer gen.free(std.testing.allocator);
+
+  std.debug.print("\nChar Markov:", .{});
   for (0..1024) |_| {
     const word = gen.gen();
     std.debug.print(" {s}", .{word});
