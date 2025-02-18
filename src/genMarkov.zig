@@ -131,16 +131,6 @@ pub fn initImmutableUncopyable(data: []const u8, options: InitOptions) !AnyMarko
   return getMarkovGenInterface(.immutable_uncopyable, data, options);
 }
 
-/// Read the packed struct from an packed array of structs
-fn readPackedStruct(comptime T: type, ptr: []const u8, index: usize) T {
-  const size = (@bitSizeOf(T) + 7) >> 3;
-  const oval_bits = ptr[index*size..][0..size];
-  var oval: T = undefined;
-  @memcpy(std.mem.asBytes(&oval)[0..size], oval_bits);
-  @memset(std.mem.asBytes(&oval)[size..], 0);
-  return oval;
-}
-
 const InitType = enum {
   mutable,
   immutable_copyable,
@@ -181,7 +171,7 @@ fn getMarkovGenInterface(comptime init: InitType, data: []const u8, immutable_op
                   std.debug.assert(@rem(bytes.len, size) == 0);
                   var from: usize = 0;
                   while (from < bytes.len): (from += size) {
-                    var oval = readPackedStruct(T, bytes, from);
+                    var oval = meta.readPackedStructEndian(T, bytes[from..][0..size], Endianness.toEndian());
                     std.mem.byteSwapAllFields(@TypeOf(oval), &oval);
                     @memcpy(bytes[from..][0..size], std.mem.asBytes(&oval)[0..size]);
                   }
@@ -224,10 +214,11 @@ fn getMarkovGenInterface(comptime init: InitType, data: []const u8, immutable_op
   }
 }
 
-fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
+pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
   const read = struct {
     fn read(comptime T: type, slice: []const u8, index: usize) T {
-      var oval = readPackedStruct(T, slice, index);
+      const size = (@bitSizeOf(T) + 7) >> 3;
+      var oval = meta.readPackedStructEndian(T, slice[size*index..][0..size], Endianness.toEndian());
       if (CpuEndianness != Endianness) std.mem.byteSwapAllFields(@TypeOf(oval), &oval);
       return oval;
     }
@@ -256,13 +247,13 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
       const key0 = read(TableKey, self.keys[0..self.key_len], self.state.index);
       const key1 = read(TableKey, self.keys[0..self.key_len], self.state.index+1);
 
-      var index = key0.value;
-        std.debug.print("\nDATA:{any}\n", .{key0});
-      while (index < key1.value): (index += (@bitSizeOf(TableVal) + 7) >> 3) {
-        const val = read(TableVal, self.vals[0..self.val_len], index);
-        std.debug.print("({any}): {any}\n", .{val, read(TableKey, self.keys[0..self.key_len], key0.next + val.subnext)});
-      }
-      std.debug.print("\n", .{});
+      // var index = key0.value;
+      //   std.debug.print("\nDATA:{any}\n", .{key0});
+      // while (index < key1.value): (index += (@bitSizeOf(TableVal) + 7) >> 3) {
+      //   const val = read(TableVal, self.vals[0..self.val_len], index);
+      //   std.debug.print("({any}): {any}\n", .{val, read(TableKey, self.keys[0..self.key_len], key0.next + val.subnext)});
+      // }
+      // std.debug.print("\n", .{});
 
       const last_val = read(TableVal, self.vals[0..self.val_len], key1.value-1).val;
       const ctx = struct {
@@ -421,7 +412,7 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
       return &self.generator.state;
     }
 
-    pub fn any(self: @This()) AnyMarkovGen {
+    pub fn any(self: *@This()) AnyMarkovGen {
       const Self = @This();
       const Adapter = struct {
         pub fn gen(ptr: *anyopaque) []const u8 { return Self.gen(@ptrCast(@alignCast(ptr))); }
@@ -432,7 +423,7 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
       };
 
       return .{
-        ._data = @as(*const AnyMarkovGen.MarkovType, @ptrCast(&self)).*,
+        ._data = @as(*const AnyMarkovGen.MarkovType, @ptrCast(self)).*,
         .vtable = &AnyMarkovGen.Vtable{
           .gen = Adapter.gen,
           .roll = Adapter.roll,
@@ -466,7 +457,7 @@ test "word_markov" {
   // gen.roll();
 
   std.debug.print("\nWord Markov:", .{});
-  for (0..1024*1024) |_| {
+  for (0..1024) |_| {
     const word = gen.gen();
     std.debug.print(" {s}", .{word});
   }

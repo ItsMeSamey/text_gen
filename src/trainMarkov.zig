@@ -3,7 +3,8 @@ const builtin = @import("builtin");
 
 const meta = @import("common/markov/meta.zig");
 const defaults = @import("common/markov/defaults.zig");
-const MarkovModelStats = @import("common/markov/markovStats.zig").ModelStats;
+const markovStats = @import("common/markov/markovStats.zig");
+const MarkovModelStats = markovStats.ModelStats;
 
 /// Make a cyclic list with a list of given type T
 /// Len is maximum len of a cycle,
@@ -34,10 +35,8 @@ pub fn GenPaddedCyclicList(Len: comptime_int, BufLen: comptime_int, T: type) typ
     /// end of the buffer
     end: usize = 0,
 
-    const Self = @This();
-
     /// Sihft elements around so that we have a contiguous slice of active elements.
-    fn emplace(self: *Self) void {
+    fn emplace(self: *@This()) void {
       if (self.end > Len) return;
 
       if (BufLen >= Len * 2 or BufLen - Len >= Len - self.end) {
@@ -50,14 +49,14 @@ pub fn GenPaddedCyclicList(Len: comptime_int, BufLen: comptime_int, T: type) typ
     }
 
     /// The array rotate so a contiguous slice can be return
-    pub fn getSlice(self: *Self) *[Len]T {
+    pub fn getSlice(self: *@This()) *[Len]T {
       self.emplace();
       return self.buf[self.end-Len..][0..Len];
     }
 
     /// Push an element to the array. This is cheap as
     /// `self.buf` is not rotated unless `self.getSlice` is called
-    pub fn push(self: *Self, val: T) void {
+    pub fn push(self: *@This(), val: T) void {
       self.buf[self.end] = val;
       self.end = if (self.end + 1 == self.buf.len) 0 else self.end + 1;
     }
@@ -89,16 +88,6 @@ test GenPaddedCyclicList {
   try testList(5, 16);
 }
 
-fn writePackedStruct(writer: std.io.AnyWriter, value: anytype) !void {
-  var copy = value;
-  const native_endian = builtin.cpu.arch.endian();
-  if (native_endian != defaults.Endian) std.mem.byteSwapAllFields(@TypeOf(copy), &copy);
-
-  const size = (@bitSizeOf(@TypeOf(copy)) + 7) >> 3;
-  const bytes = std.mem.asBytes(&copy)[0..size];
-  return try writer.writeAll(bytes);
-}
-
 /// A base onject to store the frequency of occurrence a sequence
 /// if `Key` is u8, assumes a char model
 /// The Val type here is used only during model creation
@@ -107,20 +96,13 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
   _ = MarkovModelStats.init(Len, Key, Val, defaults.Endian);
 
   // Done this way so we can easily sort the keys array without copying
-  const kvp = struct { k: [Len]Key, v: Val };
-  const MarkovMap = std.ArrayHashMap(kvp, void, struct {
-    const keyHashFn = std.array_hash_map.getAutoHashFn([Len]Key, @This());
-    pub fn hash(self: @This(), k: kvp) u32 {
-      return keyHashFn(self, k.k);
-    }
-    pub fn eql(_: @This(), a: kvp, b: kvp, _: usize) bool {
-      return meta.arrAsUint(a.k) == meta.arrAsUint(b.k);
-    }
-  }, @sizeOf([Len]Key) <= std.simd.suggestVectorLength(u8) orelse @sizeOf(usize));
+  const MarkovMap = std.AutoArrayHashMap([Len]Key, Val);
 
   return struct {
     /// Count of The markove chain
     map: MarkovMap,
+
+    pub const LENGTH: u8 = Len;
 
     pub fn init(allocator: std.mem.Allocator) @This() {
       return .{
@@ -130,8 +112,12 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
 
     /// Increment the value for encountered key
     pub fn increment(self: *@This(), key: [Len]Key) !void {
-      const result = try self.map.getOrPut(.{ .k = key, .v = 1 });
-      if (result.found_existing) result.key_ptr.v += 1;
+      const result = try self.map.getOrPut(key);
+      if (result.found_existing) {
+        result.value_ptr.* += 1;
+      } else {
+        result.value_ptr.* = 1;
+      }
     }
 
     /// Writes the data to `writer` and deinitializes this object and hence should be only called once
@@ -143,27 +129,40 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
       const TableKey = meta.TableKey(MinKeyType, Val);
       const TableVal = meta.TableVal(MinKeyType, Val);
 
-      const fullList = self.map.keys();
+      const keys_list = self.map.keys();
+      const vals_list = self.map.values();
 
-      std.sort.pdq(kvp, fullList, {}, struct {
-        fn lessThanFn(_: void, lhs: kvp, rhs: kvp) bool {
-          inline for (0..Len-1) |i| if (lhs.k[i] != rhs.k[i]) return lhs.k[i] < rhs.k[i];
+      std.sort.pdqContext(0, self.map.count(), struct {
+        k: [][Len]Key,
+        v: []Val,
+
+        pub fn lessThan(me: @This(), lidx: usize, ridx: usize) bool {
+          const lhs = me.k[lidx];
+          const rhs = me.k[ridx];
+          inline for (0..Len-1) |i| if (lhs[i] != rhs[i]) return lhs[i] < rhs[i];
           return false;
         }
-      }.lessThanFn);
+        pub fn swap(me: @This(), a: usize, b: usize) void {
+          std.mem.swap([Len]Key, &me.k[a], &me.k[b]);
+          std.mem.swap(Val, &me.v[a], &me.v[b]);
+        }
+      }{
+        .k = keys_list,
+        .v = vals_list,
+      });
 
       // Make a list if all the keys
       var list = std.ArrayList(struct { key: [Len-1]Key, from: u32, next: u32 = undefined }).init(self.map.allocator);
       defer list.deinit();
 
       try list.append(.{
-        .key = fullList[0].k[0..Len-1].*,
+        .key = keys_list[0][0..Len-1].*,
         .from = 0,
       });
-      for (fullList, 0..) |entry, from| {
-        if (meta.arrAsUint(list.getLast().key) == meta.arrAsUint(entry.k[0..Len-1])) continue;
+      for (keys_list, 0..) |k, from| {
+        if (meta.arrAsUint(list.getLast().key) == meta.arrAsUint(k[0..Len-1])) continue;
         try list.append(.{
-          .key = entry.k[0..Len-1].*,
+          .key = k[0..Len-1].*,
           .from = @intCast(from),
         });
       }
@@ -191,26 +190,24 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
           mid = start;
 
           if (builtin.mode == .Debug and mid < list.items.len and !std.mem.eql(Key, entry.key[1..], list.items[mid].key[0..Len-2])) {
-            std.debug.print("Partition point: {d}\n", .{mid});
-            std.debug.print("entry: {}, next_entry: {}", .{ entry.*, list.items[mid] });
-            unreachable;
+            std.debug.panic("Partition point: {any}\nentry: {any}, next_entry: {any}", .{mid, entry.*, list.items[mid]});
           }
         }
 
         entry.next = mid;
-        try writePackedStruct(writer, TableKey{
+        try meta.writePackedStructEndian(writer, TableKey{
           .key = @intCast(entry.key[0]),
           .value = @intCast(entry.from),
           .next = mid,
-        });
+        }, defaults.Endian);
       }
 
       // The last (extra) key to make computation easier, see genMarkov.zig's GetMarkovGen.Generator.gen
-      try writePackedStruct(writer, TableKey{
+      try meta.writePackedStructEndian(writer, TableKey{
         .key = std.math.maxInt(MinKeyType), // this is never used so it may be undefined, but that triggers ub protection
-        .value = @intCast(fullList.len),
+        .value = @intCast(keys_list.len),
         .next = 0,
-      });
+      }, defaults.Endian);
 
       // Write keys length (+1 for the extra entry at the end)
       try writer.writeInt(u64, (list.items.len + 1) * ((@bitSizeOf(TableKey) + 7) >> 3), defaults.Endian);
@@ -218,12 +215,12 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
       // Write values
       var index: u32 = 0;
       var val: Val = 0;
-      for (fullList) |item| {
-        if (meta.arrAsUint(item.k[0..Len-1]) != meta.arrAsUint(list.items[index].key)) {
+      for (keys_list, vals_list) |k, v| {
+        if (meta.arrAsUint(k[0..Len-1]) != meta.arrAsUint(list.items[index].key)) {
           index += 1;
           val = 0;
           std.debug.assert(index < list.items.len);
-          std.debug.assert(meta.arrAsUint(item.k[0..Len-1]) == meta.arrAsUint(list.items[index].key));
+          std.debug.assert(meta.arrAsUint(k[0..Len-1]) == meta.arrAsUint(list.items[index].key));
         }
 
         var mid: u32 = undefined;
@@ -231,28 +228,28 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
         var end: u32 = @intCast(list.items.len);
         while (start < end) {
           mid = start + (end - start) / 2;
-          switch (std.mem.order(Key, list.items[mid].key[0..], item.k[1..])) {
+          switch (std.mem.order(Key, list.items[mid].key[0..], k[1..])) {
             .lt => start = mid + 1,
             .gt => end = mid,
             .eq => break,
           }
         }
 
-        if (builtin.mode == .Debug and !std.mem.eql(Key, item.k[1..], list.items[mid].key[0..])) {
-          std.debug.print("Expected: {}\n", .{ item });
-          std.debug.print("Start: {}\n", .{ list.items[list.items[index].next] });
-          std.debug.print("Mid: {}\n", .{ list.items[mid] });
+        if (builtin.mode == .Debug and !std.mem.eql(Key, k[1..], list.items[mid].key[0..])) {
+          std.debug.print("Expected: {any}, {any}\n", .{k, v});
+          std.debug.print("Start: {any}\n", .{list.items[list.items[index].next]});
+          std.debug.print("Mid: {any}\n", .{list.items[mid]});
           unreachable;
         }
 
-        val += item.v;
-        try writePackedStruct(writer, TableVal{
+        val += v;
+        try meta.writePackedStructEndian(writer, TableVal{
           .val = val,
           .subnext = @intCast(mid - list.items[index].next),
-        });
+        }, defaults.Endian);
       }
 
-      try writer.writeInt(u64, (fullList.len) * ((@bitSizeOf(TableVal) + 7) >> 3), defaults.Endian);
+      try writer.writeInt(u64, (keys_list.len) * ((@bitSizeOf(TableVal) + 7) >> 3), defaults.Endian);
     }
 
     /// Free this struct
@@ -333,11 +330,13 @@ pub fn WordMakov(Len: usize) type {
 
     /// Create the instance of `@This()` object
     pub fn init(allocator: std.mem.Allocator) !@This() {
-      return .{
-        .count = try allocator.create(std.atomic.Value(u32)),
+      const retval: @This() = .{
         .base = Base.init(allocator),
         .table = Table.init(allocator),
+        .count = try allocator.create(std.atomic.Value(u32)),
       };
+      retval.count.store(1, .unordered);
+      return retval;
     }
 
     /// You can call this multiple times to train with multiple files.
@@ -433,127 +432,228 @@ test {
   std.testing.refAllDecls(WordMakov(4));
 }
 
-//---
-// Generation Impl
-// ---
+const TrainingImplementation = struct {
+  fn readAllMerged(allocator: std.mem.Allocator, dir: std.fs.Dir) ![]u8 {
+    var walker = try dir.walk(allocator);
+    defer walker.deinit();
 
-fn readAllMerged(allocator: std.mem.Allocator, dir: std.fs.Dir) ![]u8 {
-  var walker = try dir.walk(allocator);
-  defer walker.deinit();
+    var files = std.ArrayListUnmanaged(std.fs.File){};
+    defer {
+      for (files.items) |*file| file.close();
+      files.deinit(allocator);
+    }
 
-  var files = std.ArrayListUnmanaged(std.fs.File){};
-  defer {
-    for (files.items) |*file| file.close();
-    files.deinit(allocator);
+    var size: usize = 0;
+    while (try walker.next()) |entry| {
+      var file = try entry.dir.openFile(entry.basename, .{});
+      const stats = try file.stat();
+      size += stats.size + 1; // +1 for the extra newline
+      try files.append(allocator, file);
+    }
+
+    var memory = try allocator.alloc(u8, size);
+    errdefer allocator.free(memory);
+
+    size = 0;
+    for (files.items) |file| {
+      const n = try file.readAll(memory[size..]);
+      std.debug.assert(n < memory[size..].len);
+      size += n;
+      memory[size] = '\n';
+      size += 1;
+    }
+
+    std.debug.assert(size == memory.len);
+    return memory;
   }
 
-  var size: usize = 0;
-  while (try walker.next()) |entry| {
-    var file = try entry.dir.openFile(entry.basename, .{});
-    const stats = try file.stat();
-    size += stats.size + 1; // +1 for the extra newline
-    try files.append(allocator, file);
-  }
-
-  var memory = try allocator.alloc(u8, size);
-  errdefer allocator.free(memory);
-
-  size = 0;
-  for (files.items) |file| {
-    const n = try file.readAll(memory[size..]);
-    std.debug.assert(n < memory[size..].len);
-    size += n;
-    memory[size] = '\n';
-    size += 1;
-  }
-
-  std.debug.assert(size == memory.len);
-  return memory;
-}
-
-fn filterAllowed(str: []u8) []u8 {
-  var idx: usize = 0;
-  var encountered: bool = false;
-  for (str) |char_| {
-    const char = std.ascii.toLower(char_);
-    if (
-      (char >= 'a' and char <= 'z') or
-      (char >= '0' and char <= '9')
-    ) {
-      if (encountered) {
-        encountered = false;
-        str[idx] = '\x00';
+  fn filterAllowed(str: []u8) []u8 {
+    var idx: usize = 0;
+    var encountered: bool = false;
+    for (str) |char_| {
+      const char = std.ascii.toLower(char_);
+      if (
+        (char >= 'a' and char <= 'z') or
+        (char >= '0' and char <= '9')
+      ) {
+        if (encountered) {
+          encountered = false;
+          str[idx] = '\x00';
+          idx += 1;
+        }
+        str[idx] = char;
         idx += 1;
+      } else {
+        switch (char) {
+          '\'' => {},
+          else => {
+            encountered = true;
+          },
+        }
       }
-      str[idx] = char;
-      idx += 1;
-    } else {
-      switch (char) {
-        '\'' => {},
-        else => {
-          encountered = true;
-        },
-      }
+    }
+
+    return str[0..idx];
+  }
+
+  pub fn bufferedWriter(comptime buf_len: comptime_int, underlying_stream: anytype) std.io.BufferedWriter(buf_len, @TypeOf(underlying_stream)){
+    return .{ .unbuffered_writer = underlying_stream };
+  }
+
+  pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var data_dir = try std.fs.cwd().openDir("data", .{});
+    defer data_dir.close();
+
+    var markov_dir = try data_dir.openDir("markov", .{ .iterate = true, .no_follow = true });
+    defer markov_dir.close();
+
+    const file_text = try readAllMerged(allocator, markov_dir);
+    defer allocator.free(file_text);
+    const training_data = filterAllowed(file_text);
+
+    // std.debug.print("Training data: {s}\n", .{file_text});
+    var timer = try std.time.Timer.start();
+
+    { // Train word makov model
+      var makov = try WordMakovType.init(allocator);
+      defer makov.deinit();
+      timer.reset();
+      try makov.train(training_data);
+      std.debug.print("Word Makov took {d}ms\n", .{@as(f128, @floatFromInt(timer.read()))/@as(f128, @floatFromInt(std.time.ns_per_ms))});
+
+      var markov_file = try data_dir.createFile("markov.word", .{});
+      defer markov_file.close();
+
+      var buffered = bufferedWriter(1 << 20, markov_file.writer().any());
+      timer.reset();
+      try makov.write(buffered.writer().any());
+      try buffered.flush();
+      std.debug.print("Word Makov write took {d}ms\n", .{@as(f128, @floatFromInt(timer.read()))/@as(f128, @floatFromInt(std.time.ns_per_ms))});
+    }
+
+    { // Train char makov model
+      var makov = try CharMakovType.init(allocator);
+      defer makov.deinit();
+      timer.reset();
+      try makov.train(training_data);
+      std.debug.print("Char Makov took {d}ms\n", .{@as(f128, @floatFromInt(timer.read()))/@as(f128, @floatFromInt(std.time.ns_per_ms))});
+
+      var markov_file = try data_dir.createFile("markov.char", .{});
+      defer markov_file.close();
+
+      var buffered = bufferedWriter(1 << 20, markov_file.writer().any());
+      timer.reset();
+      try makov.write(buffered.writer().any());
+      try buffered.flush();
+      std.debug.print("Char Makov write took {d}ms\n", .{@as(f128, @floatFromInt(timer.read()))/@as(f128, @floatFromInt(std.time.ns_per_ms))});
     }
   }
 
-  return str[0..idx];
-}
+  fn getValidator(Len: comptime_int, K: type, V: type, endian: std.builtin.Endian)
+    (fn (base: GenBase(Len, if (K != u8) defaults.WordKey else defaults.CharKey, defaults.Val), tk_slice: []const u8, tv_slice: []const u8) void) {
+    const TableKey = meta.TableKey(K, V);
+    const TableVal = meta.TableVal(K, V);
 
-pub fn bufferedWriter(underlying_stream: anytype) std.io.BufferedWriter(1 << 20, @TypeOf(underlying_stream)) {
-  return .{ .unbuffered_writer = underlying_stream };
-}
+    const sizeTableKey = (@bitSizeOf(TableKey) + 7) >> 3;
+    const sizeTableVal = (@bitSizeOf(TableVal) + 7) >> 3;
 
-pub fn main() !void {
-  var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-  defer _ = gpa.deinit();
-  const allocator = gpa.allocator();
+    const Key = if (K != u8) defaults.WordKey else defaults.CharKey;
+    const BaseType = GenBase(Len, Key, defaults.Val);
 
-  var data_dir = try std.fs.cwd().openDir("data", .{});
-  defer data_dir.close();
+    return struct {
+      fn validate(comptime depth: comptime_int, arr: *[Len]Key, base: BaseType, tk_slice: []const u8, tv_slice: []const u8, from: usize) void {
+        const from_slice = tk_slice[from..];
+        const k0: TableKey = meta.readPackedStructEndian(TableKey, from_slice[0..sizeTableKey], endian);
+        arr[depth] = k0.key;
+        for (k0.value..meta.readPackedStructEndian(TableKey, from_slice[sizeTableKey..][0..sizeTableKey], endian).value) |i| {
+          const val = meta.readPackedStructEndian(TableVal, tv_slice[i*sizeTableVal..][0..sizeTableVal], endian);
+          if (depth+1 == Len) {
+            const mval = base.map.get(arr.*);
+            if (mval == null or mval.? != val.val) {
+              std.debug.print("Expected: {any}, got {any}\n", .{mval, val.val});
+            } else {
+              std.debug.print("Ok: {any}, got {any}\n", .{mval, val.val});
+            }
+          } else {
+            validate(depth+1, arr, base, tk_slice, tv_slice, k0.next + val.subnext);
+          }
+        }
+      }
 
-  var markov_dir = try data_dir.openDir("markov", .{ .iterate = true, .no_follow = true });
-  defer markov_dir.close();
-
-  const file_text = try readAllMerged(allocator, markov_dir);
-  defer allocator.free(file_text);
-  const training_data = filterAllowed(file_text);
-
-  // std.debug.print("Training data: {s}\n", .{file_text});
-  var timer = try std.time.Timer.start();
-
-  { // Train word makov model
-    var makov = try WordMakov(4).init(allocator);
-    defer makov.deinit();
-    timer.reset();
-    try makov.train(training_data);
-    std.debug.print("Word Makov took {d}ms\n", .{@as(f128, @floatFromInt(timer.read()))/@as(f128, @floatFromInt(std.time.ns_per_ms))});
-
-    var markov_file = try data_dir.createFile("markov.word", .{});
-    defer markov_file.close();
-
-    var buffered = bufferedWriter(markov_file.writer().any());
-    timer.reset();
-    try makov.write(buffered.writer().any());
-    try buffered.flush();
-    std.debug.print("Word Makov write took {d}ms\n", .{@as(f128, @floatFromInt(timer.read()))/@as(f128, @floatFromInt(std.time.ns_per_ms))});
+      fn validateAll(base: BaseType, tk_slice: []const u8, tv_slice: []const u8) void {
+        var start: usize = 0;
+        var arr: [Len]Key = undefined;
+        while (start < tk_slice.len): (start += sizeTableKey) validate(0, &arr, base, tk_slice, tv_slice, start);
+      }
+    }.validateAll;
   }
 
-  { // Train char makov model
-    var makov = try CharMakov(8).init(allocator);
-    defer makov.deinit();
-    timer.reset();
-    try makov.train(training_data);
-    std.debug.print("Char Makov took {d}ms\n", .{@as(f128, @floatFromInt(timer.read()))/@as(f128, @floatFromInt(std.time.ns_per_ms))});
+  test TrainingImplementation {
+    const allocator = std.testing.allocator;
+    var data_dir = try std.fs.cwd().openDir("data", .{});
+    defer data_dir.close();
 
-    var markov_file = try data_dir.createFile("markov.char", .{});
-    defer markov_file.close();
+    var markov_dir = try data_dir.openDir("markov", .{ .iterate = true, .no_follow = true });
+    defer markov_dir.close();
 
-    var buffered = bufferedWriter(markov_file.writer().any());
-    timer.reset();
-    try makov.write(buffered.writer().any());
-    try buffered.flush();
-    std.debug.print("Char Makov write took {d}ms\n", .{@as(f128, @floatFromInt(timer.read()))/@as(f128, @floatFromInt(std.time.ns_per_ms))});
+    const file_text = try readAllMerged(allocator, markov_dir);
+    defer allocator.free(file_text);
+    const training_data = filterAllowed(file_text);
+
+    const GenMarkov = @import("genMarkov.zig");
+
+    { // Train word makov model
+      var makov = try WordMakovType.init(allocator);
+      defer makov.deinit();
+      try makov.train(training_data);
+
+      const data = @embedFile("./data/markov.word");
+      var loaded = try GenMarkov.initImmutableUncopyable(data, .{.allocator = allocator, .random = undefined});
+      const stats = comptime MarkovModelStats.fromBytes(data) catch unreachable;
+      const model: *GenMarkov.GetMarkovGen(
+        stats.key.Type(),
+        stats.val.Type(),
+        markovStats.EndianEnum.fromEndian(defaults.Endian)
+      ) = @ptrCast(&loaded._data);
+
+      const keys_slice = model.generator.keys[0..model.generator.key_len];
+      const vals_slice = model.generator.vals[0..model.generator.val_len];
+
+      getValidator(@TypeOf(makov.base).LENGTH, stats.key.Type(), stats.val.Type(), defaults.Endian)(makov.base, keys_slice, vals_slice);
+    }
+
+    { // Train char makov model
+      var makov = try CharMakovType.init(allocator);
+      defer makov.deinit();
+      try makov.train(training_data);
+
+      const data = @embedFile("./data/markov.char");
+      var loaded = try GenMarkov.initImmutableUncopyable(data, .{.allocator = allocator, .random = undefined});
+      const stats = comptime MarkovModelStats.fromBytes(data) catch unreachable;
+      const model: *GenMarkov.GetMarkovGen(
+        stats.key.Type(),
+        stats.val.Type(),
+        markovStats.EndianEnum.fromEndian(defaults.Endian)
+      ) = @ptrCast(&loaded._data);
+
+      const keys_slice = model.generator.keys[0..model.generator.key_len];
+      const vals_slice = model.generator.vals[0..model.generator.val_len];
+
+      getValidator(@TypeOf(makov.base).LENGTH, stats.key.Type(), stats.val.Type(), defaults.Endian)(makov.base, keys_slice, vals_slice);
+    }
   }
+
+  const WordMakovType = WordMakov(4);
+  const CharMakovType = CharMakov(8);
+};
+
+pub const main = TrainingImplementation.main;
+
+test TrainingImplementation {
+  std.testing.refAllDecls(TrainingImplementation);
 }
 

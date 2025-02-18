@@ -87,3 +87,24 @@ pub fn TableVal(Key: type, Val: type) type {
   };
 }
 
+const native_endianness = @import("builtin").cpu.arch.endian();
+
+///
+pub fn writePackedStructEndian(writer: std.io.AnyWriter, value: anytype, comptime endian: std.builtin.Endian) !void {
+  var copy = value;
+  if (native_endianness != endian) std.mem.byteSwapAllFields(@TypeOf(copy), &copy);
+  const size = (@bitSizeOf(@TypeOf(copy)) + 7) >> 3;
+  const bytes = std.mem.asBytes(&copy)[0..size];
+  return try writer.writeAll(bytes);
+}
+
+/// Read the packed struct from bytes
+pub fn readPackedStructEndian(comptime T: type, ptr: *const [(@bitSizeOf(T) + 7) >> 3]u8, comptime endian: std.builtin.Endian) T {
+  const size = (@bitSizeOf(T) + 7) >> 3;
+  var oval: T = undefined;
+  @memcpy(std.mem.asBytes(&oval)[0..size], ptr[0..]);
+  @memset(std.mem.asBytes(&oval)[size..], 0);
+  if (native_endianness != endian) std.mem.byteSwapAllFields(@TypeOf(oval), &oval);
+  return oval;
+}
+
