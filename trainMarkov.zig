@@ -107,8 +107,6 @@ pub fn WordMakov(Len: usize) type {
     /// Writes the data to `writer` deinitialize this object
     /// You will *NOT* need to call deinit() explicitly
     pub fn write(self: *@This(), writer: std.io.AnyWriter) !void {
-      if (std.math.maxInt(u64) < self.table.count()) @panic("Table too large!");
-
       inline for (1..4) |intLen| {
         const IntType = std.meta.Int(.unsigned, 8 * (1 + intLen));
         if (std.math.maxInt(IntType) >= self.table.count()) {
