@@ -256,6 +256,14 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
       const key0 = read(TableKey, self.keys[0..self.key_len], self.state.index);
       const key1 = read(TableKey, self.keys[0..self.key_len], self.state.index+1);
 
+      // var index = key0.value;
+      //   std.debug.print("\nDATA:{any}\n", .{key0});
+      // while (index < key1.value): (index += (@bitSizeOf(TableVal) + 7) >> 3) {
+      //   const val = read(TableVal, self.vals[0..self.val_len], index);
+      //   std.debug.print("({any}): {any}\n", .{val, read(TableKey, self.keys[0..self.key_len], key0.next + val.subnext)});
+      // }
+      // std.debug.print("\n", .{});
+
       const from, const to = @import("common/markov/sort.zig").equalRange(key0.value, key1.value,
         struct {
           target: usize,
@@ -265,7 +273,7 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
             return std.math.order(v.val, ctx.target);
           }
         }{
-          .target = self.state.random.intRangeLessThan(usize, key0.value, key1.value),
+          .target = self.state.random.intRangeLessThan(usize, 0, read(TableVal, self.vals[0..self.val_len], key1.value-1).val),
           .vals = self.vals[0..self.val_len],
         }
       );
@@ -278,7 +286,7 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
     }
 
     pub fn roll(self: *@This()) void {
-      self.state.index = self.state.random.intRangeLessThan(@TypeOf(self.state.index), 0, self.key_len);
+      self.state.index = self.state.random.intRangeLessThan(@TypeOf(self.state.index), 0, @divExact(self.key_len, ((@bitSizeOf(TableKey) + 7) >> 3)));
     }
   };
 
@@ -361,7 +369,7 @@ fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
           .val_len = @intCast(vals.len),
           .state = .{
             .random = options.random,
-            .index = @intCast(options.random.intRangeLessThan(usize, 0, keys.len))
+            .index = 0,
           },
         },
         .converter = if (Key == u8) .{
@@ -440,15 +448,19 @@ test "word_markov" {
   defer data_dir.close();
 
   const data = try data_dir.readFileAlloc(allocator, "markov.word", std.math.maxInt(usize));
-  var gen = try initMutable(data, .{
+  var gen = initMutable(data, .{
     .random = @import("common/rng.zig").getRandom(),
     .allocator = allocator,
     .allocation = data
-  });
-  defer gen.free(std.testing.allocator);
+  }) catch |e| {
+    allocator.free(data);
+    return e;
+  };
+  defer gen.free(allocator);
+  // gen.roll();
 
   std.debug.print("\nWord Markov:", .{});
-  for (0..1024) |_| {
+  for (0..1024*1024) |_| {
     const word = gen.gen();
     std.debug.print(" {s}", .{word});
   }
@@ -461,12 +473,16 @@ test "char_markov" {
   defer data_dir.close();
 
   const data = try data_dir.readFileAlloc(allocator, "markov.char", std.math.maxInt(usize));
-  var gen = try initMutable(data, .{
+  var gen = initMutable(data, .{
     .random = @import("common/rng.zig").getRandom(),
     .allocator = allocator,
     .allocation = data
-  });
-  defer gen.free(std.testing.allocator);
+  }) catch |e| {
+    allocator.free(data);
+    return e;
+  };
+  defer gen.free(allocator);
+  // gen.roll();
 
   std.debug.print("\nChar Markov:", .{});
   for (0..1024) |_| {
