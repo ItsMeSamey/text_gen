@@ -1,8 +1,8 @@
 Random word text using
-1. Random Selection
+- Random Selection
     - of words
     - of sentences
-2. Markov Chains 
+- Markov Chains 
     - using characters
     - using words
 
