@@ -24,10 +24,10 @@ pub const AnyMarkovGen = struct {
     state: *const fn (*anyopaque) *StateStruct
   };
 
-  fn gen(self: *@This()) []const u8 { return self.vtable.gen(@ptrCast(&self._data)); }
-  fn roll(self: *@This()) void { self.vtable.roll(@ptrCast(&self._data)); }
-  fn free(self: *@This(), allocator: std.mem.Allocator) void { self.vtable.free(@ptrCast(&self._data), allocator); }
-  fn state(self: *@This()) *StateStruct { return self.vtable.state(@ptrCast(&self._data)); }
+  pub fn gen(self: *@This()) []const u8 { return self.vtable.gen(@ptrCast(&self._data)); }
+  pub fn roll(self: *@This()) void { self.vtable.roll(@ptrCast(&self._data)); }
+  pub fn free(self: *@This(), allocator: std.mem.Allocator) void { self.vtable.free(@ptrCast(&self._data), allocator); }
+  pub fn state(self: *@This()) *StateStruct { return self.vtable.state(@ptrCast(&self._data)); }
 };
 
 fn statsWithSameEndianness(data: []const u8) Stats {
@@ -376,10 +376,6 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
         },
         .freeable_slice = options.allocation,
       };
-
-      if (Key == u8) {
-        _ = self.gen();
-      }
     }
 
     pub fn gen(self: *@This()) []const u8 {
@@ -397,14 +393,14 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
     }
 
     pub fn free(self: *@This(), allocator: std.mem.Allocator) void {
+      if (self.freeable_slice.len != 0) {
+        allocator.free(self.freeable_slice);
+      }
+
       if (Key == u8) {
         self.converter.char.deinit(allocator);
       } else {
         self.converter.word.deinit(allocator);
-      }
-
-      if (self.freeable_slice.len != 0) {
-        allocator.free(self.freeable_slice);
       }
     }
 

@@ -206,7 +206,7 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
       try meta.writePackedStructEndian(writer, TableKey{
         .key = std.math.maxInt(MinKeyType), // this is never used so it may be undefined, but that triggers ub protection
         .value = @intCast(keys_list.len),
-        .next = 0,
+        .next = std.math.maxInt(u32),
       }, defaults.Endian);
 
       // Write keys length (+1 for the extra entry at the end)
@@ -553,8 +553,9 @@ const TrainingImplementation = struct {
     }
   }
 
-  fn getValidator(Len: comptime_int, K: type, V: type, endian: std.builtin.Endian)
-    (fn (base: GenBase(Len, if (K != u8) defaults.WordKey else defaults.CharKey, defaults.Val), tk_slice: []const u8, tv_slice: []const u8) void) {
+  fn getValidator(Len: comptime_int, K: type, V: type, endian: std.builtin.Endian) (
+    fn (base: GenBase(Len, if (K != u8) defaults.WordKey else defaults.CharKey, defaults.Val), tk_slice: []const u8, tv_slice: []const u8) void
+  ) {
     const TableKey = meta.TableKey(K, V);
     const TableVal = meta.TableVal(K, V);
 
@@ -565,21 +566,25 @@ const TrainingImplementation = struct {
     const BaseType = GenBase(Len, Key, defaults.Val);
 
     return struct {
-      fn validate(comptime depth: comptime_int, arr: *[Len]Key, base: BaseType, tk_slice: []const u8, tv_slice: []const u8, from: usize) void {
+      fn validate(comptime depth: comptime_int, arr: *[Len]Key, base: BaseType, tk_slice: []const u8, tv_slice: []const u8, from: usize, logFn: anytype) void {
+        logFn("Validating idx {d}, depth: {d}\n", .{from, depth});
+
         const from_slice = tk_slice[from..];
         const k0: TableKey = meta.readPackedStructEndian(TableKey, from_slice[0..sizeTableKey], endian);
+        logFn("k0: {any}\n", .{k0});
+
         arr[depth] = k0.key;
         for (k0.value..meta.readPackedStructEndian(TableKey, from_slice[sizeTableKey..][0..sizeTableKey], endian).value) |i| {
           const val = meta.readPackedStructEndian(TableVal, tv_slice[i*sizeTableVal..][0..sizeTableVal], endian);
+          logFn("val: {any}\n", .{val});
+
           if (depth+1 == Len) {
             const mval = base.map.get(arr.*);
             if (mval == null or mval.? != val.val) {
               std.debug.print("Expected: {any}, got {any}\n", .{mval, val.val});
-            } else {
-              std.debug.print("Ok: {any}, got {any}\n", .{mval, val.val});
             }
           } else {
-            validate(depth+1, arr, base, tk_slice, tv_slice, k0.next + val.subnext);
+            validate(depth+1, arr, base, tk_slice, tv_slice, (k0.next + val.subnext) * sizeTableKey, logFn);
           }
         }
       }
@@ -587,7 +592,25 @@ const TrainingImplementation = struct {
       fn validateAll(base: BaseType, tk_slice: []const u8, tv_slice: []const u8) void {
         var start: usize = 0;
         var arr: [Len]Key = undefined;
-        while (start < tk_slice.len): (start += sizeTableKey) validate(0, &arr, base, tk_slice, tv_slice, start);
+
+        // const logFn = std.debug.print;
+        const logFn = struct{fn f(comptime fmt: []const u8, args: anytype) void { _ = fmt; _ = args; }}.f;
+
+        {
+          var idx: usize = 0;
+          logFn("\nKeys:\n", .{});
+          while (idx < tk_slice.len): (idx += sizeTableKey) {
+            logFn("i: {d}, k: {}\n", .{idx, meta.readPackedStructEndian(TableKey, tk_slice[idx..][0..sizeTableKey], endian)});
+          }
+
+          idx = 0;
+          logFn("\nVals:\n", .{});
+          while (idx < tv_slice.len): (idx += sizeTableVal) {
+            logFn("i: {d}, v: {}\n", .{idx, meta.readPackedStructEndian(TableVal, tv_slice[idx..][0..sizeTableVal], endian)});
+          }
+        }
+
+        while (start < tk_slice.len - sizeTableKey): (start += sizeTableKey) validate(0, &arr, base, tk_slice, tv_slice, start, logFn);
       }
     }.validateAll;
   }
@@ -613,6 +636,8 @@ const TrainingImplementation = struct {
 
       const data = @embedFile("./data/markov.word");
       var loaded = try GenMarkov.initImmutableUncopyable(data, .{.allocator = allocator, .random = undefined});
+      defer loaded.free(allocator);
+
       const stats = comptime MarkovModelStats.fromBytes(data) catch unreachable;
       const model: *GenMarkov.GetMarkovGen(
         stats.key.Type(),
@@ -633,6 +658,8 @@ const TrainingImplementation = struct {
 
       const data = @embedFile("./data/markov.char");
       var loaded = try GenMarkov.initImmutableUncopyable(data, .{.allocator = allocator, .random = undefined});
+      defer loaded.free(allocator);
+
       const stats = comptime MarkovModelStats.fromBytes(data) catch unreachable;
       const model: *GenMarkov.GetMarkovGen(
         stats.key.Type(),
@@ -648,7 +675,7 @@ const TrainingImplementation = struct {
   }
 
   const WordMakovType = WordMakov(4);
-  const CharMakovType = CharMakov(8);
+  const CharMakovType = CharMakov(4);
 };
 
 pub const main = TrainingImplementation.main;
