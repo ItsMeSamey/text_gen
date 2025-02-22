@@ -375,7 +375,7 @@ pub fn WordMakov(Len: usize) type {
         const str = try self.table.allocator.alloc(u8, val.len);
         @memcpy(str, val);
         result.key_ptr.* = str;
-        result.value_ptr.* = @intCast(self.table.count());
+        result.value_ptr.* = @intCast(self.table.count() - 1); // Since the new entry is counted as well in `table.count()`
       }
 
       cyclicList.push(result.value_ptr.*);
@@ -566,17 +566,19 @@ const TrainingImplementation = struct {
     const BaseType = GenBase(Len, Key, defaults.Val);
 
     return struct {
-      fn validate(comptime depth: comptime_int, arr: *[Len]Key, base: BaseType, tk_slice: []const u8, tv_slice: []const u8, from: usize, logFn: anytype) void {
-        logFn("Validating idx {d}, depth: {d}\n", .{from, depth});
+      const log_list = false;
+      const log_validate = false;
+      fn validate(comptime depth: comptime_int, arr: *[Len]Key, base: BaseType, tk_slice: []const u8, tv_slice: []const u8, from: usize) void {
+        if(log_validate) std.debug.print("Validating idx {d}, depth: {d}\n", .{from, depth});
 
         const from_slice = tk_slice[from..];
         const k0: TableKey = meta.readPackedStructEndian(TableKey, from_slice[0..sizeTableKey], endian);
-        logFn("k0: {any}\n", .{k0});
+        if(log_validate) std.debug.print("k0: {any}\n", .{k0});
 
         arr[depth] = k0.key;
         for (k0.value..meta.readPackedStructEndian(TableKey, from_slice[sizeTableKey..][0..sizeTableKey], endian).value) |i| {
           const val = meta.readPackedStructEndian(TableVal, tv_slice[i*sizeTableVal..][0..sizeTableVal], endian);
-          logFn("val: {any}\n", .{val});
+          if(log_validate) std.debug.print("val: {any}\n", .{val});
 
           if (depth+1 == Len) {
             const mval = base.map.get(arr.*);
@@ -584,7 +586,7 @@ const TrainingImplementation = struct {
               std.debug.print("Expected: {any}, got {any}\n", .{mval, val.val});
             }
           } else {
-            validate(depth+1, arr, base, tk_slice, tv_slice, (k0.next + val.subnext) * sizeTableKey, logFn);
+            validate(depth+1, arr, base, tk_slice, tv_slice, (k0.next + val.subnext) * sizeTableKey);
           }
         }
       }
@@ -593,24 +595,22 @@ const TrainingImplementation = struct {
         var start: usize = 0;
         var arr: [Len]Key = undefined;
 
-        // const logFn = std.debug.print;
-        const logFn = struct{fn f(comptime fmt: []const u8, args: anytype) void { _ = fmt; _ = args; }}.f;
-
-        {
+        if (log_list) {
           var idx: usize = 0;
-          logFn("\nKeys:\n", .{});
+          std.debug.print("\nKeys:\n", .{});
           while (idx < tk_slice.len): (idx += sizeTableKey) {
-            logFn("i: {d}, k: {}\n", .{idx, meta.readPackedStructEndian(TableKey, tk_slice[idx..][0..sizeTableKey], endian)});
+            std.debug.print("i: {d}, k: {}\n", .{idx, meta.readPackedStructEndian(TableKey, tk_slice[idx..][0..sizeTableKey], endian)});
           }
 
           idx = 0;
-          logFn("\nVals:\n", .{});
+          std.debug.print("\nVals:\n", .{});
           while (idx < tv_slice.len): (idx += sizeTableVal) {
-            logFn("i: {d}, v: {}\n", .{idx, meta.readPackedStructEndian(TableVal, tv_slice[idx..][0..sizeTableVal], endian)});
+            std.debug.print("i: {d}, v: {}\n", .{idx, meta.readPackedStructEndian(TableVal, tv_slice[idx..][0..sizeTableVal], endian)});
           }
         }
 
-        while (start < tk_slice.len - sizeTableKey): (start += sizeTableKey) validate(0, &arr, base, tk_slice, tv_slice, start, logFn);
+        // `- sizeTableKey` to skip the extra entry at the end
+        while (start < tk_slice.len - sizeTableKey): (start += sizeTableKey) validate(0, &arr, base, tk_slice, tv_slice, start);
       }
     }.validateAll;
   }

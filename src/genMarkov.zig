@@ -331,7 +331,7 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
         while (conv_table[i] != '\x00') i += 1;
         i += 1;
       }
-      try table.append(@intCast(conv_table.len + 1)); // Extra terminal entry
+      try table.append(@intCast(conv_table.len)); // Terminal entry
 
       const table_slice = try table.toOwnedSlice();
 
