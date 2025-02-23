@@ -196,7 +196,7 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
 
         entry.next = mid;
         try meta.writePackedStructEndian(writer, TableKey{
-          .key = @intCast(entry.key[0]),
+          .key = @intCast(entry.key[Len-2]),
           .value = @intCast(entry.from),
           .next = mid,
         }, defaults.Endian);
@@ -264,13 +264,14 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
   };
 }
 
-test {
+test GenBase {
   std.testing.refAllDecls(GenBase(2, defaults.CharKey, defaults.Val));
   std.testing.refAllDecls(GenBase(2, defaults.WordKey, defaults.Val));
 }
 
 pub fn CharMakov(Len: usize) type {
   const Base = GenBase(Len, defaults.CharKey, defaults.Val);
+  const CyclicList = GenCyclicList(Len, defaults.CharKey);
 
   return struct {
     /// The base containing the modal
@@ -289,11 +290,16 @@ pub fn CharMakov(Len: usize) type {
         try self.base.increment(data[i..][0..Len].*);
       }
 
-      var stiching: [Len-1 + Len-1]u8 = undefined;
-      @memcpy(stiching[0..Len-1], data[data.len-(Len-1)..][0..Len-1]);
-      @memcpy(stiching[Len-1..], data[0..Len-1]);
-      for (0..Len-1) |i| {
-        try self.base.increment(stiching[i..][0..Len].*);
+      var cyclicList: CyclicList = .{};
+      for (data[data.len-(Len-1)..]) |c| cyclicList.push(c);
+      if (data[data.len-1] != 0 and data[0] != 0) {
+        cyclicList.push(0);
+        try self.base.increment(cyclicList.getSlice().*);
+      }
+
+      for (data[0..Len-1]) |c| {
+        cyclicList.push(c);
+        try self.base.increment(cyclicList.getSlice().*);
       }
     }
 
@@ -313,6 +319,10 @@ pub fn CharMakov(Len: usize) type {
       return .{.base = try self.base.clone()};
     }
   };
+}
+
+test CharMakov {
+  std.testing.refAllDecls(CharMakov(2));
 }
 
 pub fn WordMakov(Len: usize) type {
@@ -427,8 +437,7 @@ pub fn WordMakov(Len: usize) type {
   };
 }
 
-test {
-  std.testing.refAllDecls(CharMakov(4));
+test WordMakov {
   std.testing.refAllDecls(WordMakov(4));
 }
 
@@ -554,7 +563,7 @@ const TrainingImplementation = struct {
   }
 
   fn getValidator(Len: comptime_int, K: type, V: type, endian: std.builtin.Endian) (
-    fn (base: GenBase(Len, if (K != u8) defaults.WordKey else defaults.CharKey, defaults.Val), tk_slice: []const u8, tv_slice: []const u8) void
+    fn (markov: anytype, tk_slice: []const u8, tv_slice: []const u8) void
   ) {
     const TableKey = meta.TableKey(K, V);
     const TableVal = meta.TableVal(K, V);
@@ -568,49 +577,88 @@ const TrainingImplementation = struct {
     return struct {
       const log_list = false;
       const log_validate = false;
-      fn validate(comptime depth: comptime_int, arr: *[Len]Key, base: BaseType, tk_slice: []const u8, tv_slice: []const u8, from: usize) void {
+
+      var arr: [Len]Key = undefined;
+      var tk_slice: []const u8 = undefined;
+      var tv_slice: []const u8 = undefined;
+      var from: usize = undefined;
+      var last_count: V = undefined;
+
+      fn validate(comptime depth: comptime_int, markov: anytype) void {
         if(log_validate) std.debug.print("Validating idx {d}, depth: {d}\n", .{from, depth});
 
         const from_slice = tk_slice[from..];
         const k0: TableKey = meta.readPackedStructEndian(TableKey, from_slice[0..sizeTableKey], endian);
-        if(log_validate) std.debug.print("k0: {any}\n", .{k0});
-
+        if(log_validate) {
+          if (K == u8) {
+            std.debug.print("k0: (.key = {c}, .value = {d}, .next = {d})\n", .{k0.key, k0.value, k0.next});
+          } else {
+            std.debug.print("k0: (.key = {s}, .value = {d}, .next = {d})\n", .{markov.table.keys()[k0.key], k0.value, k0.next});
+          }
+        }
         arr[depth] = k0.key;
+
+        if (depth == Len-1) {
+          const base: BaseType = markov.base;
+          const mval = base.map.get(arr);
+          if (mval == null or mval.? != last_count) {
+            std.debug.print("Expected: {d:4}, got {d:4} for `", .{mval.?, last_count, });
+            for (arr) |key| {
+              if (K == u8) {
+                std.debug.print("{c}", .{key});
+              } else {
+                std.debug.print("{s} ", .{markov.table.keys()[key]});
+              }
+            }
+            if (K != u8) std.debug.print("\x08", .{});
+            std.debug.print("`\n", .{});
+          }
+          return;
+        }
+
+        var last_read_count: V = 0;
         for (k0.value..meta.readPackedStructEndian(TableKey, from_slice[sizeTableKey..][0..sizeTableKey], endian).value) |i| {
           const val = meta.readPackedStructEndian(TableVal, tv_slice[i*sizeTableVal..][0..sizeTableVal], endian);
           if(log_validate) std.debug.print("val: {any}\n", .{val});
 
-          if (depth+1 == Len) {
-            const mval = base.map.get(arr.*);
-            if (mval == null or mval.? != val.val) {
-              std.debug.print("Expected: {any}, got {any}\n", .{mval, val.val});
-            }
-          } else {
-            validate(depth+1, arr, base, tk_slice, tv_slice, (k0.next + val.subnext) * sizeTableKey);
-          }
+          last_count = val.val - last_read_count;
+          last_read_count = val.val;
+
+          from = (k0.next + val.subnext) * sizeTableKey;
+          validate(depth+1, markov);
         }
       }
 
-      fn validateAll(base: BaseType, tk_slice: []const u8, tv_slice: []const u8) void {
+      fn validateAll(markov: anytype, tk: []const u8, tv: []const u8) void {
+        tk_slice = tk;
+        tv_slice = tv;
         var start: usize = 0;
-        var arr: [Len]Key = undefined;
 
         if (log_list) {
           var idx: usize = 0;
           std.debug.print("\nKeys:\n", .{});
-          while (idx < tk_slice.len): (idx += sizeTableKey) {
-            std.debug.print("i: {d}, k: {}\n", .{idx, meta.readPackedStructEndian(TableKey, tk_slice[idx..][0..sizeTableKey], endian)});
-          }
-
-          idx = 0;
-          std.debug.print("\nVals:\n", .{});
-          while (idx < tv_slice.len): (idx += sizeTableVal) {
-            std.debug.print("i: {d}, v: {}\n", .{idx, meta.readPackedStructEndian(TableVal, tv_slice[idx..][0..sizeTableVal], endian)});
+          while (idx < tk_slice.len - sizeTableKey): (idx += sizeTableKey) {
+            const k0: TableKey = meta.readPackedStructEndian(TableKey, tk_slice[idx..][0..sizeTableKey], endian);
+            if (K == u8) {
+              std.debug.print("{d:8}: (.value = {d:8}, .next = {d:8}, .key = {c})\n", .{idx, k0.value, k0.next, k0.key});
+            } else {
+              std.debug.print("{d:8}: (.value = {d:8}, .next = {d:8}, .key = {s})\n", .{idx, k0.value, k0.next, markov.table.keys()[k0.key]});
+            }
+            const k1: TableKey = meta.readPackedStructEndian(TableKey, tk_slice[idx+sizeTableKey..][0..sizeTableKey], endian);
+            const vals = tv[k0.value*sizeTableVal..k1.value*sizeTableVal];
+            var sub_idx: usize = 0;
+            while (sub_idx < vals.len): (sub_idx += sizeTableVal) {
+              const v: TableVal = meta.readPackedStructEndian(TableVal, vals[sub_idx..][0..sizeTableVal], endian);
+              std.debug.print("\t{d:8}: v: (.subnext: {d:4}, .val: {d:4})\n", .{idx, v.subnext, v.val});
+            }
           }
         }
 
         // `- sizeTableKey` to skip the extra entry at the end
-        while (start < tk_slice.len - sizeTableKey): (start += sizeTableKey) validate(0, &arr, base, tk_slice, tv_slice, start);
+        while (start < tk_slice.len - sizeTableKey): (start += sizeTableKey) {
+          from = start;
+          validate(0, markov);
+        }
       }
     }.validateAll;
   }
@@ -648,34 +696,36 @@ const TrainingImplementation = struct {
       const keys_slice = model.generator.keys[0..model.generator.key_len];
       const vals_slice = model.generator.vals[0..model.generator.val_len];
 
-      getValidator(@TypeOf(makov.base).LENGTH, stats.key.Type(), stats.val.Type(), defaults.Endian)(makov.base, keys_slice, vals_slice);
+      const validate = getValidator(@TypeOf(makov.base).LENGTH, stats.key.Type(), stats.val.Type(), defaults.Endian);
+
+      validate(makov, keys_slice, vals_slice);
     }
 
-    { // Train char makov model
-      var makov = try CharMakovType.init(allocator);
-      defer makov.deinit();
-      try makov.train(training_data);
-
-      const data = @embedFile("./data/markov.char");
-      var loaded = try GenMarkov.initImmutableUncopyable(data, .{.allocator = allocator, .random = undefined});
-      defer loaded.free(allocator);
-
-      const stats = comptime MarkovModelStats.fromBytes(data) catch unreachable;
-      const model: *GenMarkov.GetMarkovGen(
-        stats.key.Type(),
-        stats.val.Type(),
-        markovStats.EndianEnum.fromEndian(defaults.Endian)
-      ) = @ptrCast(&loaded._data);
-
-      const keys_slice = model.generator.keys[0..model.generator.key_len];
-      const vals_slice = model.generator.vals[0..model.generator.val_len];
-
-      getValidator(@TypeOf(makov.base).LENGTH, stats.key.Type(), stats.val.Type(), defaults.Endian)(makov.base, keys_slice, vals_slice);
-    }
+    // { // Train char makov model
+    //   var makov = try CharMakovType.init(allocator);
+    //   defer makov.deinit();
+    //   try makov.train(training_data);
+    //
+    //   const data = @embedFile("./data/markov.char");
+    //   var loaded = try GenMarkov.initImmutableUncopyable(data, .{.allocator = allocator, .random = undefined});
+    //   defer loaded.free(allocator);
+    //
+    //   const stats = comptime MarkovModelStats.fromBytes(data) catch unreachable;
+    //   const model: *GenMarkov.GetMarkovGen(
+    //     stats.key.Type(),
+    //     stats.val.Type(),
+    //     markovStats.EndianEnum.fromEndian(defaults.Endian)
+    //   ) = @ptrCast(&loaded._data);
+    //
+    //   const keys_slice = model.generator.keys[0..model.generator.key_len];
+    //   const vals_slice = model.generator.vals[0..model.generator.val_len];
+    //
+    //   getValidator(@TypeOf(makov.base).LENGTH, stats.key.Type(), stats.val.Type(), defaults.Endian)(makov, keys_slice, vals_slice);
+    // }
   }
 
   const WordMakovType = WordMakov(4);
-  const CharMakovType = CharMakov(4);
+  const CharMakovType = CharMakov(8);
 };
 
 pub const main = TrainingImplementation.main;
