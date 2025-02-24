@@ -19,11 +19,7 @@ pub fn lowerBound(from: usize, to: usize, context: anytype) usize {
   return partitionPoint(from, to, struct {
     sub_ctx: @TypeOf(context),
     pub fn predicate(self: @This(), index: usize) bool {
-      if ((@hasDecl(@TypeOf(context), "greaterThan"))) {
-        return self.sub_ctx.greaterThan(index);
-      } else {
-        return self.sub_ctx.compareFn(index) == .gt;
-      }
+      return self.sub_ctx.compareFn(index).invert() == .lt;
     }
   }{
     .sub_ctx = context,
@@ -34,11 +30,7 @@ pub fn upperBound(from: usize, to: usize, context: anytype) usize {
   return partitionPoint(from, to, struct {
     sub_ctx: @TypeOf(context),
     pub fn predicate(self: @This(), index: usize) bool {
-      if ((@hasDecl(@TypeOf(context), "lessThan"))) {
-        return !self.sub_ctx.lessThan(index);
-      } else {
-        return self.sub_ctx.compareFn(index) != .lt;
-      }
+      return self.sub_ctx.compareFn(index).invert() != .gt;
     }
   }{
     .sub_ctx = context,

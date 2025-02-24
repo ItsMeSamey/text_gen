@@ -227,65 +227,8 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
   const TableKey = meta.TableKey(Key, Val);
   const TableVal = meta.TableVal(Key, Val);
 
-  // key generator
-  const Generator = struct {
-    /// The state of this generator
-    state: StateStruct,
-
-    /// pointer to table of keys
-    keys: [*]const u8,
-    /// pointer to table of values to the keys
-    vals: [*]const u8,
-
-    /// Table of keys length
-    key_len: u32,
-    /// Table of values length
-    val_len: u32,
-
-    /// Generate a key, a key may or may not translate to a full word
-    fn gen(self: *@This()) Key {
-      const key0 = read(TableKey, self.keys[0..self.key_len], self.state.index);
-      const key1 = read(TableKey, self.keys[0..self.key_len], self.state.index+1);
-
-      // var index = key0.value;
-      //   std.debug.print("\nDATA:{any}\n", .{key0});
-      // while (index < key1.value): (index += (@bitSizeOf(TableVal) + 7) >> 3) {
-      //   const val = read(TableVal, self.vals[0..self.val_len], index);
-      //   std.debug.print("({any}): {any}\n", .{val, read(TableKey, self.keys[0..self.key_len], key0.next + val.subnext)});
-      // }
-      // std.debug.print("\n", .{});
-
-      const last_val = read(TableVal, self.vals[0..self.val_len], key1.value-1).val;
-      const ctx = struct {
-        target: usize,
-        vals: []const u8,
-        pub fn compareFn(ctx: @This(), idx: usize) std.math.Order {
-          const v = read(TableVal, ctx.vals, idx);
-          return std.math.order(v.val, ctx.target);
-        }
-      }{
-        .target = self.state.random.intRangeLessThan(usize, 0, last_val),
-        .vals = self.vals[0..self.val_len],
-      };
-      const from, const to = @import("common/markov/sort.zig").equalRange(key0.value, key1.value, ctx);
-
-      const idx: u32 = blk: {
-        if (from == to) {
-          break :blk @intCast(if (from == key1.value) from - 1 else from);
-        }
-        break :blk self.state.random.intRangeLessThan(u32, @intCast(from), @intCast(to));
-      };
-
-      const val = read(TableVal, self.vals[0..self.val_len], idx);
-      self.state.index = key0.next + val.subnext;
-
-      return key0.key;
-    }
-
-    pub fn roll(self: *@This()) void {
-      self.state.index = self.state.random.intRangeLessThan(u32, 0, @divExact(self.key_len, ((@bitSizeOf(TableKey) + 7) >> 3)));
-    }
-  };
+  const sizeTableKey = (@bitSizeOf(TableKey) + 7) >> 3;
+  const sizeTableVal = (@bitSizeOf(TableVal) + 7) >> 3;
 
   const CharConverter = struct {
     buffer: [*]u8,
@@ -356,6 +299,89 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
     generator: Generator,
     converter: union{ char: CharConverter, word: WordConverter },
     freeable_slice: []const u8,
+
+    const RetStruct = @This();
+
+    // key generator
+    const Generator = struct {
+      /// The state of this generator
+      state: StateStruct,
+
+      /// pointer to table of keys
+      keys: [*]const u8,
+      /// pointer to table of values to the keys
+      vals: [*]const u8,
+
+      /// Table of keys length
+      key_len: u32,
+      /// Table of values length
+      val_len: u32,
+
+      fn printKey(self: *@This(), key: TableKey) void {
+        if (Key == u8) {
+          std.debug.print("({c:1}({d:3})", .{key.key, key.key});
+        } else {
+          const patent: *RetStruct = @fieldParentPtr("generator", self);
+          std.debug.print("({s}", .{patent.converter.word.convert(key.key)});
+        }
+
+        std.debug.print(", .value = {d:8}, .next = {d:8})", .{key.value, key.next});
+      }
+
+      /// Generate a key, a key may or may not translate to a full word
+      fn gen(self: *@This()) Key {
+        const key0 = read(TableKey, self.keys[0..self.key_len], self.state.index);
+        const key1 = read(TableKey, self.keys[0..self.key_len], self.state.index+1);
+        const vals = self.vals[key0.value*sizeTableVal..key1.value*sizeTableVal];
+
+        // std.debug.print("\nDATA: ", .{});
+        // printKey(self, key0);
+        // std.debug.print("\n", .{});
+        // for (0..key1.value - key0.value) |index| {
+        //   const val = read(TableVal, vals, index);
+        //   const key = read(TableKey, self.keys[0..self.key_len], key0.next + val.subnext);
+        //   std.debug.print("(.subnext = {d:8}, .val = {d:8}): ", .{val.subnext, val.val});
+        //   printKey(self, key);
+        //   std.debug.print("\n", .{});
+        // }
+        // std.debug.print("\n", .{});
+
+        const last_val = read(TableVal, self.vals[0..self.val_len], key1.value-1).val;
+        const Ctx = struct {
+          vals: []const u8,
+          target: Val,
+          pub fn compareFn(ctx: @This(), idx: usize) std.math.Order {
+            const v = read(TableVal, ctx.vals, idx);
+            return std.math.order(ctx.target, v.val);
+          }
+        };
+
+        const idx: u32 = blk: {
+          if (key1.value - key0.value == 1) break :blk 0;
+
+          const target = self.state.random.intRangeLessThan(Val, 0, last_val);
+
+          const first_val = read(TableVal, vals, 0).val;
+          if (target <= first_val) break :blk 0;
+          if (key1.value - key0.value == 2) break :blk 1;
+
+          const sort = @import("common/markov/sort.zig");
+          const from, const to = sort.equalRange(1, vals.len / sizeTableVal, Ctx{.target = target, .vals = vals});
+          if (from == to) break :blk @intCast(from);
+
+          break :blk self.state.random.intRangeLessThan(u32, @intCast(from), @intCast(to));
+        };
+
+        const val = read(TableVal, vals, idx);
+        self.state.index = key0.next + val.subnext;
+
+        return key0.key;
+      }
+
+      pub fn roll(self: *@This()) void {
+        self.state.index = self.state.random.intRangeLessThan(u32, 0, @divExact(self.key_len, sizeTableKey));
+      }
+    };
 
     fn initFragments(self: *@This(), keys: []const u8, vals: []const u8, convTable: ?[]const u8, options: InitOptions) !void {
       self.* = .{
