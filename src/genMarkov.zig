@@ -13,7 +13,8 @@ pub const StateStruct = struct {
 
 pub const AnyMarkovGen = struct {
   const MarkovType = GetMarkovGen(u0, u0, CpuEndianness);
-  /// WARNING: Any operations on this field are unchecked illegal behaviour
+  /// WARNING: Any operations on this field (without explicit knowledge of what you are doing)
+  ///   are __unchecked__ illegal behaviour
   _data: MarkovType,
   vtable: *const Vtable,
 
