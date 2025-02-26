@@ -22,13 +22,15 @@ pub const AnyMarkovGen = struct {
     gen: *const fn (*anyopaque) []const u8,
     roll: *const fn (*anyopaque) void,
     free: *const fn (*anyopaque, allocator: std.mem.Allocator) void,
-    state: *const fn (*anyopaque) *StateStruct
+    state: *const fn (*anyopaque) *StateStruct,
+    dupe: *const fn (*anyopaque, allocator: std.mem.Allocator) std.mem.Allocator.Error!AnyMarkovGen,
   };
 
   pub fn gen(self: *@This()) []const u8 { return self.vtable.gen(@ptrCast(&self._data)); }
   pub fn roll(self: *@This()) void { self.vtable.roll(@ptrCast(&self._data)); }
   pub fn free(self: *@This(), allocator: std.mem.Allocator) void { self.vtable.free(@ptrCast(&self._data), allocator); }
   pub fn state(self: *@This()) *StateStruct { return self.vtable.state(@ptrCast(&self._data)); }
+  pub fn dupe(self: *@This(), allocator: std.mem.Allocator) std.mem.Allocator.Error!@This() { return self.vtable.dupe(@ptrCast(&self._data), allocator); }
 };
 
 fn statsWithSameEndianness(data: []const u8) Stats {
@@ -297,8 +299,14 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
   };
 
   return struct {
+    /// The generator to be used
     generator: Generator,
+    /// The converter to be used
     converter: union{ char: CharConverter, word: WordConverter },
+
+    /// if len is 0, this is an empty slice
+    /// if len is 1, this is a clone of the original slice (this is safe as model length is guaranteed to be at least 1)
+    /// otherwise, this is a slice that will be freed upon deinit
     freeable_slice: []const u8,
 
     const RetStruct = @This();
@@ -368,8 +376,11 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
 
           const sort = @import("common/markov/sort.zig");
           const from, const to = sort.equalRange(1, vals.len / sizeTableVal, Ctx{.target = target, .vals = vals});
-          if (from == to) break :blk @intCast(from);
 
+          std.debug.assert(from <= to);
+          std.debug.assert(to < vals.len / sizeTableVal);
+
+          if (from == to) break :blk @intCast(from);
           break :blk self.state.random.intRangeLessThan(u32, @intCast(from), @intCast(to));
         };
 
@@ -420,19 +431,33 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
     }
 
     pub fn free(self: *@This(), allocator: std.mem.Allocator) void {
-      if (self.freeable_slice.len != 0) {
-        allocator.free(self.freeable_slice);
-      }
-
-      if (Key == u8) {
-        self.converter.char.deinit(allocator);
-      } else {
-        self.converter.word.deinit(allocator);
+      switch (self.freeable_slice.len) {
+        0 => {},
+        1 => { // This is a clone
+          if (Key == u8) self.converter.char.deinit(allocator);
+        },
+        else => { // Normal struct
+          allocator.free(self.freeable_slice);
+          if (Key == u8) {
+            self.converter.char.deinit(allocator);
+          } else {
+            self.converter.word.deinit(allocator);
+          }
+        },
       }
     }
 
     pub fn state(self: *@This()) *StateStruct {
       return &self.generator.state;
+    }
+
+    fn dupe(self: *@This(), allocator: std.mem.Allocator) std.mem.Allocator.Error!@This() {
+      var retval = self.*;
+      retval.freeable_slice.len = 1;
+      if (Key == u8) {
+        retval.converter.char.buffer = (try allocator.dupe(u8, self.converter.char.buffer[0..self.converter.char.buffer_at])).ptr;
+      }
+      return retval;
     }
 
     pub fn any(self: *@This()) AnyMarkovGen {
@@ -442,7 +467,10 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
         pub fn roll(ptr: *anyopaque) void { return Self.roll(@ptrCast(@alignCast(ptr))); }
         pub fn free(ptr: *anyopaque, allocator: std.mem.Allocator) void { return Self.free(@ptrCast(@alignCast(ptr)), allocator); }
         pub fn state(ptr: *anyopaque) *StateStruct { return &@as(*Self, @ptrCast(@alignCast(ptr))).generator.state; }
-        pub fn dupe(ptr: *anyopaque) *usize { return &@as(*Self, @ptrCast(@alignCast(ptr))).generator.state; }
+        pub fn dupe(ptr: *anyopaque, allocator: std.mem.Allocator) std.mem.Allocator.Error!AnyMarkovGen {
+          var generator: Self = try @as(*Self, @ptrCast(@alignCast(ptr))).dupe(allocator);
+          return generator.any();
+        }
       };
 
       return .{
@@ -452,6 +480,7 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
           .roll = Adapter.roll,
           .free = Adapter.free,
           .state = Adapter.state,
+          .dupe = Adapter.dupe,
         },
       };
     }
