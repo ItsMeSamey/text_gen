@@ -456,7 +456,7 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
       retval.freeable_slice.len = 1;
       if (Key == u8) {
         retval.converter.char.buffer = (try allocator.alloc(u8, self.converter.char.buffer_capacity)).ptr;
-        @memcpy(retval.converter.char.buffer[retval.converter.char.buffer_at], self.converter.char.buffer[0..self.converter.char.buffer_at]);
+        @memcpy(retval.converter.char.buffer[0..retval.converter.char.buffer_at], self.converter.char.buffer[0..self.converter.char.buffer_at]);
       }
       return retval;
     }
