@@ -235,14 +235,14 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
 
   const CharConverter = struct {
     buffer: [*]u8,
-    buffer_capacity: u32,
     buffer_at: u32,
+    buffer_capacity: u32,
 
     pub fn init(buffer_capacity: u32, allocator: std.mem.Allocator) !@This() {
       return .{
         .buffer = (try allocator.alloc(u8, buffer_capacity)).ptr,
-        .buffer_capacity = buffer_capacity,
         .buffer_at = 0,
+        .buffer_capacity = buffer_capacity,
       };
     }
 
@@ -455,7 +455,8 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
       var retval = self.*;
       retval.freeable_slice.len = 1;
       if (Key == u8) {
-        retval.converter.char.buffer = (try allocator.dupe(u8, self.converter.char.buffer[0..self.converter.char.buffer_at])).ptr;
+        retval.converter.char.buffer = (try allocator.alloc(u8, self.converter.char.buffer_capacity)).ptr;
+        @memcpy(retval.converter.char.buffer[retval.converter.char.buffer_at], self.converter.char.buffer[0..self.converter.char.buffer_at]);
       }
       return retval;
     }
