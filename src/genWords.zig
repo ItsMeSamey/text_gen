@@ -91,7 +91,7 @@ pub fn GetRandomGen(comptime_options: ComptimeOptions, Data: type) type {
     }
 
     pub fn roll(self: *@This()) void {
-      self.state.at = self.state.random.intRangeLessThan(u32, 0, self.data.getData().len);
+      self.state.at = self.state.random.intRangeLessThan(u32, 0, @intCast(self.data.getData().len));
     }
   };
 }
