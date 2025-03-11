@@ -22,7 +22,7 @@ pub const ComptimeOptions = struct {
 
 pub const State = struct {
   /// index for last random word generated
-  at: RandomIntType = 0,
+  at: u32 = 0,
   /// RNG device used for random index generation
   random: std.Random,
 };
@@ -69,7 +69,7 @@ pub fn GetRandomGen(comptime_options: ComptimeOptions, Data: type) type {
     pub fn next(self: *@This()) []const u8 {
       const data: []const u8 = self.data.getData();
       const start = self.state.at;
-      const end = std.mem.indexOfScalarPos(u8, data, self.state.at, comptime_options.saperator) orelse data.len;
+      const end = std.mem.indexOfScalarPos(u8, data, @intCast(self.state.at), comptime_options.saperator) orelse data.len;
       defer self.state.at = if (end + 1 < data.len) @truncate(end + 1) else 0;
       return data[start..end];
     }

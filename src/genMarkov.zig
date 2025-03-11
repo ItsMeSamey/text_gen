@@ -7,7 +7,7 @@ const CpuEndianness = Stats.EndianEnum.fromEndian(@import("builtin").cpu.arch.en
 /// These are the values that define the state of the generator
 /// You can get the generator to behave deterministicaly by restoring these values only
 pub const StateStruct = struct {
-  index: u32,
+  at: u32,
   random: std.Random,
 };
 
@@ -339,8 +339,8 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
 
       /// Generate a key, a key may or may not translate to a full word
       fn gen(self: *@This()) Key {
-        const key0 = read(TableKey, self.keys[0..self.key_len], self.state.index);
-        const key1 = read(TableKey, self.keys[0..self.key_len], self.state.index+1);
+        const key0 = read(TableKey, self.keys[0..self.key_len], self.state.at);
+        const key1 = read(TableKey, self.keys[0..self.key_len], self.state.at+1);
         const vals = self.vals[key0.value*sizeTableVal..key1.value*sizeTableVal];
 
         // std.debug.print("\nDATA: ", .{});
@@ -385,13 +385,13 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
         };
 
         const val = read(TableVal, vals, idx);
-        self.state.index = key0.next + val.subnext;
+        self.state.at = key0.next + val.subnext;
 
         return key0.key;
       }
 
       pub fn roll(self: *@This()) void {
-        self.state.index = self.state.random.intRangeLessThan(u32, 0, @divExact(self.key_len, sizeTableKey));
+        self.state.at = self.state.random.intRangeLessThan(u32, 0, @divExact(self.key_len, sizeTableKey));
       }
     };
 
