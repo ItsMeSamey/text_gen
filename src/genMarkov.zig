@@ -404,7 +404,7 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
           .val_len = @intCast(vals.len),
           .state = .{
             .random = options.random,
-            .index = 0,
+            .at = 0,
           },
         },
         .converter = if (Key == u8) .{
