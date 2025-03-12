@@ -343,25 +343,24 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
         const key1 = read(TableKey, self.keys[0..self.key_len], self.state.at+1);
         const vals = self.vals[key0.value*sizeTableVal..key1.value*sizeTableVal];
 
-        std.debug.print("\nDATA: ", .{});
-        printKey(self, key0);
-        std.debug.print("\n", .{});
-        for (0..key1.value - key0.value) |index| {
-          const val = read(TableVal, vals, index);
-          const key = read(TableKey, self.keys[0..self.key_len], key0.next + val.subnext);
-          std.debug.print("(.subnext = {d:8}, .val = {d:8}): ", .{val.subnext, val.val});
-          printKey(self, key);
-          std.debug.print("\n", .{});
-        }
-        std.debug.print("\n", .{});
+        // std.debug.print("\nDATA: ", .{});
+        // printKey(self, key0);
+        // std.debug.print("\n", .{});
+        // for (0..key1.value - key0.value) |index| {
+        //   const val = read(TableVal, vals, index);
+        //   const key = read(TableKey, self.keys[0..self.key_len], key0.next + val.subnext);
+        //   std.debug.print("(.subnext = {d:8}, .val = {d:8}): ", .{val.subnext, val.val});
+        //   printKey(self, key);
+        //   std.debug.print("\n", .{});
+        // }
+        // std.debug.print("\n", .{});
 
         const last_val = read(TableVal, self.vals[0..self.val_len], key1.value-1).val;
         const Ctx = struct {
           vals: []const u8,
           target: Val,
-          pub fn compareFn(ctx: @This(), idx: usize) std.math.Order {
-            const v = read(TableVal, ctx.vals, idx);
-            return std.math.order(ctx.target, v.val);
+          pub fn predicate(ctx: @This(), idx: usize) bool {
+            return read(TableVal, ctx.vals, idx).val < ctx.target;
           }
         };
 
@@ -375,13 +374,12 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
           if (key1.value - key0.value == 2) break :blk 1;
 
           const sort = @import("common/markov/sort.zig");
-          const from, const to = sort.equalRange(1, vals.len / sizeTableVal, Ctx{.target = target, .vals = vals});
+          const target_idx = sort.partitionPoint(1, key1.value - key0.value, Ctx{.target = target, .vals = vals});
 
-          std.debug.assert(from <= to);
-          std.debug.assert(to < vals.len / sizeTableVal);
+          std.debug.assert(target_idx + 1 == key1.value - key0.value or read(TableVal, vals, target_idx + 1).val >= target);
+          std.debug.assert(read(TableVal, vals, target_idx - 1).val < target);
 
-          if (from == to) break :blk @intCast(from);
-          break :blk self.state.random.intRangeLessThan(u32, @intCast(from), @intCast(to));
+          break :blk @intCast(target_idx);
         };
 
         const val = read(TableVal, vals, idx);
@@ -488,35 +486,35 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
   };
 }
 
-// test {
-//   std.testing.refAllDecls(@This());
-// }
-//
-// test "word_markov" {
-//   const allocator = std.testing.allocator;
-//   var data_dir = try std.fs.cwd().makeOpenPath("data", .{});
-//   defer data_dir.close();
-//
-//   const data = try data_dir.readFileAlloc(allocator, "markov.word", std.math.maxInt(usize));
-//   var rng = std.Random.DefaultPrng.init(1);
-//   var gen = initMutable(data, .{
-//     .random = rng.random(),
-//     .allocator = allocator,
-//     .allocation = data
-//   }) catch |e| {
-//     allocator.free(data);
-//     return e;
-//   };
-//   defer gen.free(allocator);
-//   // gen.roll();
-//
-//   std.debug.print("\nWord Markov:", .{});
-//   for (0..1024) |_| {
-//     const word = gen.gen();
-//     std.debug.print(" {s}", .{word});
-//   }
-//   std.debug.print("\n", .{});
-// }
+test {
+  std.testing.refAllDecls(@This());
+}
+
+test "word_markov" {
+  const allocator = std.testing.allocator;
+  var data_dir = try std.fs.cwd().makeOpenPath("data", .{});
+  defer data_dir.close();
+
+  const data = try data_dir.readFileAlloc(allocator, "markov.word", std.math.maxInt(usize));
+  var rng = std.Random.DefaultPrng.init(1);
+  var gen = initMutable(data, .{
+    .random = rng.random(),
+    .allocator = allocator,
+    .allocation = data
+  }) catch |e| {
+    allocator.free(data);
+    return e;
+  };
+  defer gen.free(allocator);
+  // gen.roll();
+
+  std.debug.print("\nWord Markov:", .{});
+  for (0..1024) |_| {
+    const word = gen.gen();
+    std.debug.print(" {s}", .{word});
+  }
+  std.debug.print("\n", .{});
+}
 
 test "char_markov" {
   const allocator = std.testing.allocator;
@@ -537,7 +535,7 @@ test "char_markov" {
   // gen.roll();
 
   std.debug.print("\nChar Markov:", .{});
-  for (0..32) |_| {
+  for (0..1024) |_| {
     const word = gen.gen();
     std.debug.print(" {s}", .{word});
   }
