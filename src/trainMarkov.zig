@@ -116,7 +116,7 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
       if (result.found_existing) {
         result.value_ptr.* += 1;
       } else {
-        result.value_ptr.* = 1;
+        result.value_ptr.* = 0;
       }
     }
 
@@ -186,7 +186,7 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
             }
           }
 
-          // Partition point uses start/low instead of mid
+          // Partition point returns start/low instead of mid (as the result)
           mid = start;
 
           if (builtin.mode == .Debug and mid < list.items.len and !std.mem.eql(Key, entry.key[1..], list.items[mid].key[0..Len-2])) {
@@ -247,6 +247,7 @@ pub fn GenBase(Len: comptime_int, Key: type, Val: type) type {
           .val = val,
           .subnext = @intCast(mid - list.items[index].next),
         }, defaults.Endian);
+        val += 1;
       }
 
       try writer.writeInt(u64, (keys_list.len) * ((@bitSizeOf(TableVal) + 7) >> 3), defaults.Endian);

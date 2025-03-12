@@ -343,17 +343,17 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
         const key1 = read(TableKey, self.keys[0..self.key_len], self.state.at+1);
         const vals = self.vals[key0.value*sizeTableVal..key1.value*sizeTableVal];
 
-        // std.debug.print("\nDATA: ", .{});
-        // printKey(self, key0);
-        // std.debug.print("\n", .{});
-        // for (0..key1.value - key0.value) |index| {
-        //   const val = read(TableVal, vals, index);
-        //   const key = read(TableKey, self.keys[0..self.key_len], key0.next + val.subnext);
-        //   std.debug.print("(.subnext = {d:8}, .val = {d:8}): ", .{val.subnext, val.val});
-        //   printKey(self, key);
-        //   std.debug.print("\n", .{});
-        // }
-        // std.debug.print("\n", .{});
+        std.debug.print("\nDATA: ", .{});
+        printKey(self, key0);
+        std.debug.print("\n", .{});
+        for (0..key1.value - key0.value) |index| {
+          const val = read(TableVal, vals, index);
+          const key = read(TableKey, self.keys[0..self.key_len], key0.next + val.subnext);
+          std.debug.print("(.subnext = {d:8}, .val = {d:8}): ", .{val.subnext, val.val});
+          printKey(self, key);
+          std.debug.print("\n", .{});
+        }
+        std.debug.print("\n", .{});
 
         const last_val = read(TableVal, self.vals[0..self.val_len], key1.value-1).val;
         const Ctx = struct {
