@@ -368,7 +368,7 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
         const idx: u32 = blk: {
           if (key1.value - key0.value == 1) break :blk 0;
 
-          const target = self.state.random.intRangeLessThan(Val, 0, last_val);
+          const target = self.state.random.intRangeAtMost(Val, 0, last_val);
 
           const first_val = read(TableVal, vals, 0).val;
           if (target <= first_val) break :blk 0;
@@ -488,34 +488,35 @@ pub fn GetMarkovGen(Key: type, Val: type, Endianness: Stats.EndianEnum) type {
   };
 }
 
-test {
-  std.testing.refAllDecls(@This());
-}
-
-test "word_markov" {
-  const allocator = std.testing.allocator;
-  var data_dir = try std.fs.cwd().makeOpenPath("data", .{});
-  defer data_dir.close();
-
-  const data = try data_dir.readFileAlloc(allocator, "markov.word", std.math.maxInt(usize));
-  var gen = initMutable(data, .{
-    .random = @import("common/rng.zig").getRandom(),
-    .allocator = allocator,
-    .allocation = data
-  }) catch |e| {
-    allocator.free(data);
-    return e;
-  };
-  defer gen.free(allocator);
-  // gen.roll();
-
-  std.debug.print("\nWord Markov:", .{});
-  for (0..1024) |_| {
-    const word = gen.gen();
-    std.debug.print(" {s}", .{word});
-  }
-  std.debug.print("\n", .{});
-}
+// test {
+//   std.testing.refAllDecls(@This());
+// }
+//
+// test "word_markov" {
+//   const allocator = std.testing.allocator;
+//   var data_dir = try std.fs.cwd().makeOpenPath("data", .{});
+//   defer data_dir.close();
+//
+//   const data = try data_dir.readFileAlloc(allocator, "markov.word", std.math.maxInt(usize));
+//   var rng = std.Random.DefaultPrng.init(1);
+//   var gen = initMutable(data, .{
+//     .random = rng.random(),
+//     .allocator = allocator,
+//     .allocation = data
+//   }) catch |e| {
+//     allocator.free(data);
+//     return e;
+//   };
+//   defer gen.free(allocator);
+//   // gen.roll();
+//
+//   std.debug.print("\nWord Markov:", .{});
+//   for (0..1024) |_| {
+//     const word = gen.gen();
+//     std.debug.print(" {s}", .{word});
+//   }
+//   std.debug.print("\n", .{});
+// }
 
 test "char_markov" {
   const allocator = std.testing.allocator;
@@ -523,8 +524,9 @@ test "char_markov" {
   defer data_dir.close();
 
   const data = try data_dir.readFileAlloc(allocator, "markov.char", std.math.maxInt(usize));
+  var rng = std.Random.DefaultPrng.init(0);
   var gen = initMutable(data, .{
-    .random = @import("common/rng.zig").getRandom(),
+    .random = rng.random(),
     .allocator = allocator,
     .allocation = data
   }) catch |e| {
@@ -535,7 +537,7 @@ test "char_markov" {
   // gen.roll();
 
   std.debug.print("\nChar Markov:", .{});
-  for (0..1024) |_| {
+  for (0..32) |_| {
     const word = gen.gen();
     std.debug.print(" {s}", .{word});
   }

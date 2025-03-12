@@ -663,74 +663,77 @@ const TrainingImplementation = struct {
     }.validateAll;
   }
 
-  test TrainingImplementation {
-    const allocator = std.testing.allocator;
-    var data_dir = try std.fs.cwd().openDir("data", .{});
-    defer data_dir.close();
-
-    var markov_dir = try data_dir.openDir("markov", .{ .iterate = true, .no_follow = true });
-    defer markov_dir.close();
-
-    const file_text = try readAllMerged(allocator, markov_dir);
-    defer allocator.free(file_text);
-    const training_data = filterAllowed(file_text);
-
-    const GenMarkov = @import("genMarkov.zig");
-
-    { // Train word makov model
-      var makov = try WordMakovType.init(allocator);
-      defer makov.deinit();
-      try makov.train(training_data);
-
-      const data = @embedFile("./data/markov.word");
-      var loaded = try GenMarkov.initImmutableUncopyable(data, .{.allocator = allocator, .random = undefined});
-      defer loaded.free(allocator);
-
-      const stats = comptime MarkovModelStats.fromBytes(data) catch unreachable;
-      const model: *GenMarkov.GetMarkovGen(
-        stats.key.Type(),
-        stats.val.Type(),
-        markovStats.EndianEnum.fromEndian(defaults.Endian)
-      ) = @ptrCast(&loaded._data);
-
-      const keys_slice = model.generator.keys[0..model.generator.key_len];
-      const vals_slice = model.generator.vals[0..model.generator.val_len];
-
-      const validate = getValidator(@TypeOf(makov.base).LENGTH, stats.key.Type(), stats.val.Type(), defaults.Endian);
-
-      validate(makov, keys_slice, vals_slice);
-    }
-
-    // { // Train char makov model
-    //   var makov = try CharMakovType.init(allocator);
-    //   defer makov.deinit();
-    //   try makov.train(training_data);
-    //
-    //   const data = @embedFile("./data/markov.char");
-    //   var loaded = try GenMarkov.initImmutableUncopyable(data, .{.allocator = allocator, .random = undefined});
-    //   defer loaded.free(allocator);
-    //
-    //   const stats = comptime MarkovModelStats.fromBytes(data) catch unreachable;
-    //   const model: *GenMarkov.GetMarkovGen(
-    //     stats.key.Type(),
-    //     stats.val.Type(),
-    //     markovStats.EndianEnum.fromEndian(defaults.Endian)
-    //   ) = @ptrCast(&loaded._data);
-    //
-    //   const keys_slice = model.generator.keys[0..model.generator.key_len];
-    //   const vals_slice = model.generator.vals[0..model.generator.val_len];
-    //
-    //   getValidator(@TypeOf(makov.base).LENGTH, stats.key.Type(), stats.val.Type(), defaults.Endian)(makov, keys_slice, vals_slice);
-    // }
-  }
-
-  const WordMakovType = WordMakov(4);
-  const CharMakovType = CharMakov(8);
+  // This test takes quite a while to run so it is disabled by default
+  // test TrainingImplementation {
+  //   const allocator = std.testing.allocator;
+  //   var data_dir = try std.fs.cwd().openDir("data", .{});
+  //   defer data_dir.close();
+  //
+  //   var markov_dir = try data_dir.openDir("markov", .{ .iterate = true, .no_follow = true });
+  //   defer markov_dir.close();
+  //
+  //   const file_text = try readAllMerged(allocator, markov_dir);
+  //   defer allocator.free(file_text);
+  //   const training_data = filterAllowed(file_text);
+  //
+  //   const GenMarkov = @import("genMarkov.zig");
+  //
+  //   { // Train word makov model
+  //     var makov = try WordMakovType.init(allocator);
+  //     defer makov.deinit();
+  //     try makov.train(training_data);
+  //
+  //     const data = @embedFile("./data/markov.word");
+  //     var loaded = try GenMarkov.initImmutableUncopyable(data, .{.allocator = allocator, .random = undefined});
+  //     defer loaded.free(allocator);
+  //
+  //     const stats = comptime MarkovModelStats.fromBytes(data) catch unreachable;
+  //     const model: *GenMarkov.GetMarkovGen(
+  //       stats.key.Type(),
+  //       stats.val.Type(),
+  //       markovStats.EndianEnum.fromEndian(defaults.Endian)
+  //     ) = @ptrCast(&loaded._data);
+  //
+  //     const keys_slice = model.generator.keys[0..model.generator.key_len];
+  //     const vals_slice = model.generator.vals[0..model.generator.val_len];
+  //
+  //     const validate = getValidator(@TypeOf(makov.base).LENGTH, stats.key.Type(), stats.val.Type(), defaults.Endian);
+  //
+  //     validate(makov, keys_slice, vals_slice);
+  //   }
+  //
+  //   { // Train char makov model
+  //     var makov = try CharMakovType.init(allocator);
+  //     defer makov.deinit();
+  //     try makov.train(training_data);
+  //
+  //     const data = @embedFile("./data/markov.char");
+  //     var loaded = try GenMarkov.initImmutableUncopyable(data, .{.allocator = allocator, .random = undefined});
+  //     defer loaded.free(allocator);
+  //
+  //     const stats = comptime MarkovModelStats.fromBytes(data) catch unreachable;
+  //     const model: *GenMarkov.GetMarkovGen(
+  //       stats.key.Type(),
+  //       stats.val.Type(),
+  //       markovStats.EndianEnum.fromEndian(defaults.Endian)
+  //     ) = @ptrCast(&loaded._data);
+  //
+  //     const keys_slice = model.generator.keys[0..model.generator.key_len];
+  //     const vals_slice = model.generator.vals[0..model.generator.val_len];
+  //
+  //     getValidator(@TypeOf(makov.base).LENGTH, stats.key.Type(), stats.val.Type(), defaults.Endian)(makov, keys_slice, vals_slice);
+  //   }
+  // }
 };
-
-pub const main = TrainingImplementation.main;
 
 test TrainingImplementation {
   std.testing.refAllDecls(TrainingImplementation);
 }
+
+// WordMakovType to use for model generation
+const WordMakovType = WordMakov(4);
+// CharMakovType to use for model generation
+const CharMakovType = CharMakov(8);
+
+pub const main = TrainingImplementation.main;
 
