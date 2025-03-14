@@ -90,8 +90,15 @@ pub fn GetRandomGen(comptime_options: ComptimeOptions, Data: type) type {
       };
     }
 
+    /// Randomly set the state of this generator
     pub fn roll(self: *@This()) void {
       self.state.at = self.state.random.intRangeLessThan(u32, 0, @intCast(self.data.getData().len));
+    }
+
+    /// Return true if the state is valid, false otherwise
+    /// You must `roll()` if this function returns false otherwise illegal behaviour will occur
+    pub fn validateState(self: *const @This()) bool {
+      return self.state.at < self.data.getData().len;
     }
   };
 }
